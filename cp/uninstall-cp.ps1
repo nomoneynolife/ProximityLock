@@ -1,4 +1,4 @@
-# 卸载 ProximityLock Credential Provider (安全模式下也能跑)
+﻿# 卸载 ProximityLock Credential Provider (安全模式下也能跑)
 # 必须以管理员身份运行
 
 $ErrorActionPreference = "Continue"

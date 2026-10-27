@@ -29,6 +29,7 @@ Windows 自动提交 creds.bin 里的凭据 → 进桌面
 | `install-cp.ps1` | 管理员安装: 复制 DLL、设 ACL、写注册表、备份 reg |
 | `uninstall-cp.ps1` | 卸载 (安全模式也能跑) |
 | `setup-credential.ps1` | 录入账户密码, DPAPI 机器范围加密成 creds.bin |
+| `simulate-phone.ps1` | VM 无蓝牙时模拟手机靠近/离开 (写 state.ini) |
 
 ## VM 测试步骤
 
@@ -41,14 +42,36 @@ cd <项目>\cp
 # 1. 录入凭据 (VM 里的登录账户)
 .\setup-credential.ps1 -User 用户名 -Domain .    # 本地账户 Domain 用 . 或计算机名
 
-# 2. 模拟"手机在附近": 手动写状态文件 (真实环境由托盘程序自动写)
-$dir = "C:\ProgramData\ProximityLock"
-"near=1`nts=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" | Set-Content "$dir\state.ini" -Encoding ascii
+# 2. 模拟"手机在附近" (VM 没蓝牙, 见下节)
+.\simulate-phone.ps1 -KeepNear     # 持续刷新时间戳, Ctrl+C 停止
 
-# 3. Win+L 锁屏, 观察是否自动回到桌面
+# 3. 另开一个窗口 Win+L 锁屏 (或用 tscon / 直接锁), 观察是否自动回到桌面
 ```
 
 真实环境不用手动写 state.ini：`ProximityLock.exe` 一边监听一边每秒刷新它。
+
+## VM 里没有蓝牙怎么触发?
+
+**不需要蓝牙。** 蓝牙只在"托盘程序 → state.ini"这一段用到，CP 只认 state.ini。
+所以 VM 的验证拆成两段：
+
+| 验证内容 | 在哪做 | 怎么做 |
+|---|---|---|
+| 真实 BLE 信号 / RSSI / 阈值 / 离开锁屏 | **宿主机** | 直接跑 `ProximityLock.exe` + 手机广播 |
+| CP 自动登录 (pbAutoLogon / 轮询刷新) | **VM** | `simulate-phone.ps1` 写状态文件 |
+
+`simulate-phone.ps1` 的四种用法：
+
+```powershell
+.\simulate-phone.ps1 -Status     # 看当前 near / ts 和判定结果
+.\simulate-phone.ps1 -Near       # 模拟靠近 (写一次, 6 秒有效)
+.\simulate-phone.ps1 -KeepNear   # 持续模拟靠近, Ctrl+C 停 (推荐)
+.\simulate-phone.ps1 -Away       # 模拟离开 (near=0)
+```
+
+想真机靠近驱动 VM（可选）：
+- **USB 蓝牙 dongle 直通**：VMware 菜单 → 虚拟机 → 可移动设备 → 连接蓝牙适配器（内置蓝牙一般无法直通，需要外接 USB dongle），VM 里装好驱动后直接把 `ProximityLock.exe` 拷进去跑，就是完整链路
+- **网络心跳桥**：VM 用桥接网络，手机浏览器/快捷指令打一个 HTTP 接口写 state.ini（还没做，需要就说）
 
 ## 出问题怎么救
 

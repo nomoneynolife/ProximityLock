@@ -1,4 +1,4 @@
-# 录入自动解锁用的 Windows 账户凭据
+﻿# 录入自动解锁用的 Windows 账户凭据
 # DPAPI 机器范围加密 (SYSTEM 可解, 需要管理员权限写 ProgramData)
 # 用法: 管理员运行 .\setup-credential.ps1 -User 你的用户名 [-Domain 域或计算机名]
 
