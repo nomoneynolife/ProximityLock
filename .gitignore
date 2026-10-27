@@ -13,6 +13,11 @@ android-app/.idea/
 # 构建产物
 *.apk
 *.exe
+cp/*.obj
+cp/*.lib
+cp/*.exp
+cp/*.dll
+cp/build.log
 
 # 系统与工具
 Thumbs.db

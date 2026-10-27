@@ -91,6 +91,7 @@ public sealed class BeaconWatcher : IDisposable
         _locked = false;
         _everSeen = false;
         lock (_sync) { _beacons.Clear(); }
+        ProximityState.Write(false);   // 停止监听时告诉 CP: 不在附近, 别自动解锁
         LockStateChanged?.Invoke(false);
     }
 
@@ -150,6 +151,10 @@ public sealed class BeaconWatcher : IDisposable
     private void Evaluate()
     {
         var now = DateTimeOffset.Now;
+
+        // 每轮都把"是否在附近"写出去, 给 Credential Provider 读 (方案C 自动解锁)
+        var nearby = _everSeen && (now - _lastSeen).TotalSeconds <= 3;
+        ProximityState.Write(nearby);
 
         // 预热期: 从没收到过目标 Beacon 时不能判定"丢失", 否则一启动就锁屏
         if (!_everSeen)
