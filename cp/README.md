@@ -28,7 +28,7 @@ Windows 自动提交 creds.bin 里的凭据 → 进桌面
 | `build.bat` | 编译 (需 VS + C++ 工作负载) |
 | `install-cp.ps1` | 管理员安装: 复制 DLL、设 ACL、写注册表、备份 reg |
 | `uninstall-cp.ps1` | 卸载 (安全模式也能跑) |
-| `setup-credential.ps1` | 录入账户密码, DPAPI 机器范围加密成 creds.bin |
+| `setup-credential.ps1` | 录入账户密码, DPAPI 机器范围加密成 creds.bin (`-SelfTest` 可自检) |
 | `simulate-phone.ps1` | VM 无蓝牙时模拟手机靠近/离开 (写 state.ini) |
 
 ## VM 测试步骤
@@ -40,6 +40,7 @@ cd <项目>\cp
 .\install-cp.ps1                  # 安装 (会备份注册表)
 
 # 1. 录入凭据 (VM 里的登录账户)
+.\setup-credential.ps1 -SelfTest                 # 先自检 DPAPI 是否可用
 .\setup-credential.ps1 -User 用户名 -Domain .    # 本地账户 Domain 用 . 或计算机名
 
 # 2. 模拟"手机在附近" (VM 没蓝牙, 见下节)
