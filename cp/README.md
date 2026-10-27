@@ -32,10 +32,17 @@ Windows 自动提交 creds.bin 里的凭据 → 进桌面
 | `simulate-phone.ps1` | VM 无蓝牙时模拟手机靠近/离开 (写 state.ini) |
 | `install-cp.cmd` / `uninstall-cp.cmd` / `setup-credential.cmd` | 双击即跑: 自动提权 + 绕过执行策略 |
 
+## 兼容性
+
+脚本同时支持 **Windows PowerShell 5.1** 和 **PowerShell 7+**（`pwsh`）：
+
+- 注册表备份用纯 PowerShell 导出成 JSON，不调 `reg.exe`（首次安装时键不存在，reg 会报错中断）
+- PS 7.3+ 会把 native 命令非零退出码当错误，脚本里已把 `$PSNativeCommandUseErrorActionPreference` 设为 false
+- 凭据加密直接 P/Invoke `CryptProtectData`，不依赖 `System.Security.ProtectedData`（PS7 里是独立包）
+
 ## 报错 "在此系统上禁止运行脚本"
 
 Windows 默认执行策略是 `Restricted`，`.ps1` 直接被拦。三选一，都不改系统全局设置：
-
 ```powershell
 # 1) 最省事: 双击对应 .cmd (install-cp.cmd / setup-credential.cmd / uninstall-cp.cmd)
 #    自动弹 UAC 提权 + Bypass, 跑完窗口保留
@@ -93,7 +100,7 @@ cd <项目>\cp
 ## 出问题怎么救
 
 1. 登录界面异常 → 重启进**安全模式** → 管理员 PowerShell → `.\uninstall-cp.ps1`
-2. 还不行 → 用安装时生成的 `cp-registry-backup-*.reg` 恢复注册表
+2. 还不行 → 用安装时生成的 `cp-registry-backup-*.json` 手工恢复（纯文本，记录了每个键路径/值名/类型/值）
 3. 最坏情况 → VM 回滚快照（所以必须在 VM 里玩）
 
 ## 已知限制 / 待验证
