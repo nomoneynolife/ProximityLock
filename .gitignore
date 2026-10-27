@@ -1,0 +1,20 @@
+# .NET
+pc-app/bin/
+pc-app/obj/
+
+# Android / Gradle
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+android-app/.idea/
+*.iml
+
+# 构建产物
+*.apk
+*.exe
+
+# 系统与工具
+Thumbs.db
+.DS_Store
+.workbuddy/

@@ -1,0 +1,76 @@
+<Window x:Class="ProximityLock.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Proximity Lock - 手机靠近解锁(蓝牙版)" Height="620" Width="640"
+        ResizeMode="CanMinimize" WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="150"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Beacon UUID (与安卓端一致)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="UuidBox" Padding="6" VerticalContentAlignment="Center"
+                     Text="E2C56DB5-DFFB-48D2-B060-D0F5A71096E0" FontFamily="Consolas"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+                <Button x:Name="RandBtn" Content="随机" Width="56" Height="30" Margin="0,0,6,0" Click="RandBtn_Click"/>
+                <Button x:Name="CopyBtn" Content="复制" Width="56" Height="30" Margin="0,0,6,0" Click="CopyBtn_Click"/>
+                <Button x:Name="DefaultBtn" Content="恢复默认" Width="72" Height="30" Margin="0,0,6,0" Click="DefaultBtn_Click"/>
+                <Button x:Name="SaveBtn" Content="保存" Width="56" Height="30" Click="SaveBtn_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Text="锁屏信号阈值 (RSSI, 越接近 0 越近)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <Grid Grid.Row="3" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Slider x:Name="RssiSlider" Minimum="-100" Maximum="-40" Value="-65"
+                    TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" x:Name="RssiValueText" Text="-65 dBm (阈值)" Width="90"
+                       VerticalAlignment="Center" TextAlignment="Right"/>
+        </Grid>
+
+        <TextBlock Grid.Row="4" Text="信号丢失判定时间 (秒)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="5" x:Name="LostTimeoutBox" Text="8" Margin="0,0,0,12" Padding="6" Width="120"
+                 HorizontalAlignment="Left"/>
+
+        <StackPanel Grid.Row="6" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button x:Name="StartBtn" Content="开始监听" Width="110" Height="32" Margin="0,0,10,0"
+                    Click="StartBtn_Click"/>
+            <Button x:Name="StopBtn" Content="停止" Width="110" Height="32" Margin="0,0,10,0"
+                    IsEnabled="False" Click="StopBtn_Click"/>
+            <Button x:Name="TestLockBtn" Content="测试锁屏" Width="110" Height="32" Margin="0,0,10,0"
+                    Click="TestLockBtn_Click"/>
+            <CheckBox x:Name="AutoStartCheck" Content="开机自启动(静默+自动监听)" VerticalAlignment="Center"
+                      Checked="AutoStart_Changed" Unchecked="AutoStart_Changed"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="7" Text="实时信号 (绿色 = 已绑定的目标手机)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <Border Grid.Row="8" Background="#F4F4F4" CornerRadius="6" Padding="8">
+            <Grid>
+                <TextBlock x:Name="NoSignalText" Foreground="#999999" VerticalAlignment="Top"
+                           Text="尚未收到任何 iBeacon — 检查手机广播是否开启 / PC 蓝牙是否可用"/>
+                <ItemsControl x:Name="SignalList"/>
+            </Grid>
+        </Border>
+
+        <RichTextBox Grid.Row="9" x:Name="LogBox" Margin="0,12,0,0" Background="#FAFAFA"
+                     BorderBrush="#DDDDDD" BorderThickness="1" IsReadOnly="True"
+                     VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
+    </Grid>
+</Window>
