@@ -31,6 +31,7 @@ Windows 自动提交 creds.bin 里的凭据 → 进桌面
 | `setup-credential.ps1` | 录入账户密码, DPAPI 机器范围加密成 creds.bin (`-SelfTest` 可自检) |
 | `simulate-phone.ps1` | VM 无蓝牙时模拟手机靠近/离开 (写 state.ini) |
 | `install-cp.cmd` / `uninstall-cp.cmd` / `setup-credential.cmd` | 双击即跑: 自动提权 + 绕过执行策略 |
+| `simulate-phone.cmd` | 双击即跑的状态模拟 (同样绕过执行策略, 不需要管理员) |
 
 ## 兼容性
 
@@ -67,7 +68,7 @@ cd <项目>\cp
 .\setup-credential.ps1 -User 用户名 -Domain .    # 本地账户 Domain 用 . 或计算机名
 
 # 2. 模拟"手机在附近" (VM 没蓝牙, 见下节)
-.\simulate-phone.ps1 -KeepNear     # 持续刷新时间戳, Ctrl+C 停止
+.\simulate-phone.cmd -KeepNear     # 持续刷新时间戳, Ctrl+C 停止
 
 # 3. 另开一个窗口 Win+L 锁屏 (或用 tscon / 直接锁), 观察是否自动回到桌面
 ```
@@ -84,13 +85,13 @@ cd <项目>\cp
 | 真实 BLE 信号 / RSSI / 阈值 / 离开锁屏 | **宿主机** | 直接跑 `ProximityLock.exe` + 手机广播 |
 | CP 自动登录 (pbAutoLogon / 轮询刷新) | **VM** | `simulate-phone.ps1` 写状态文件 |
 
-`simulate-phone.ps1` 的四种用法：
+`simulate-phone.ps1` 的四种用法（**PS 里跑脚本会被执行策略拦，优先双击 `simulate-phone.cmd`**）：
 
 ```powershell
-.\simulate-phone.ps1 -Status     # 看当前 near / ts 和判定结果
-.\simulate-phone.ps1 -Near       # 模拟靠近 (写一次, 6 秒有效)
-.\simulate-phone.ps1 -KeepNear   # 持续模拟靠近, Ctrl+C 停 (推荐)
-.\simulate-phone.ps1 -Away       # 模拟离开 (near=0)
+.\simulate-phone.cmd -Status     # 看当前 near / ts 和判定结果
+.\simulate-phone.cmd -Near       # 模拟靠近 (写一次, 6 秒有效)
+.\simulate-phone.cmd -KeepNear   # 持续模拟靠近, Ctrl+C 停 (推荐)
+.\simulate-phone.cmd -Away       # 模拟离开 (near=0)
 ```
 
 想真机靠近驱动 VM（可选）：
