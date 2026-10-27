@@ -88,7 +88,9 @@ function Invoke-Dpapi {
 
         $result = New-Object byte[] $out.cbData
         [Runtime.InteropServices.Marshal]::Copy($out.pbData, $result, 0, $out.cbData)
-        return $result
+        # 逗号包一层: PowerShell 输出管道会把 byte[] 拆成 Object[], 导致调用方拿到 Object[]
+        # (PS 5.1 靠隐式转换能救, PS 7 直接报 AddRange 参数类型不匹配)
+        return , $result
     }
     finally {
         if ($in.pbData -ne [IntPtr]::Zero) {
@@ -106,8 +108,8 @@ if ($SelfTest) {
     Write-Host ("PowerShell 版本: " + $PSVersionTable.PSVersion)
     $probe = [Text.Encoding]::UTF8.GetBytes("proximitylock-selftest-probe")
     try {
-        $enc = Invoke-Dpapi -Data $probe
-        $dec = Invoke-Dpapi -Data $enc -Unprotect
+        $enc = [byte[]](Invoke-Dpapi -Data $probe)
+        $dec = [byte[]](Invoke-Dpapi -Data $enc -Unprotect)
         $roundTrip = ([Text.Encoding]::UTF8.GetString($dec) -eq "proximitylock-selftest-probe")
         Write-Host ("加密: " + $probe.Length + " 字节 -> " + $enc.Length + " 字节")
         Write-Host ("解密回环: " + $(if ($roundTrip) { "OK" } else { "不一致" })) -ForegroundColor $(if ($roundTrip) { "Green" } else { "Red" })
@@ -169,7 +171,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes($plain)
 $plain = $null
 
 try {
-    $blob = Invoke-Dpapi -Data $bytes
+    $blob = [byte[]](Invoke-Dpapi -Data $bytes)
 }
 catch {
     Write-Host ("[ERROR] 加密失败: " + $_.Exception.Message) -ForegroundColor Red
@@ -179,8 +181,8 @@ catch {
 
 # 落盘格式: 4 字节长度(小端) + 密文, 与 CP 端读取一致
 $out = New-Object System.Collections.Generic.List[byte]
-$out.AddRange([BitConverter]::GetBytes([int]$blob.Length))
-$out.AddRange($blob)
+$out.AddRange([bitconverter]::GetBytes([int]$blob.Length))
+$out.AddRange([byte[]]$blob)
 [IO.File]::WriteAllBytes($credsFile, $out.ToArray())
 
 # 收紧权限: 只留 SYSTEM / Administrators
@@ -199,7 +201,7 @@ try {
     $len = [BitConverter]::ToInt32($readBack, 0)
     $payload = New-Object byte[] $len
     [Array]::Copy($readBack, 4, $payload, 0, $len)
-    $verify = Invoke-Dpapi -Data $payload -Unprotect
+    $verify = [byte[]](Invoke-Dpapi -Data $payload -Unprotect)
     $verifyText = [Text.Encoding]::UTF8.GetString($verify)
     $lines = $verifyText -split "`n"
     $verifyOk = ($lines.Count -ge 3 -and $lines[0] -eq $User -and $lines[1] -eq $Domain -and $lines[2].Length -gt 0)
