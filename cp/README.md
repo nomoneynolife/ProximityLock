@@ -30,6 +30,22 @@ Windows 自动提交 creds.bin 里的凭据 → 进桌面
 | `uninstall-cp.ps1` | 卸载 (安全模式也能跑) |
 | `setup-credential.ps1` | 录入账户密码, DPAPI 机器范围加密成 creds.bin (`-SelfTest` 可自检) |
 | `simulate-phone.ps1` | VM 无蓝牙时模拟手机靠近/离开 (写 state.ini) |
+| `install-cp.cmd` / `uninstall-cp.cmd` / `setup-credential.cmd` | 双击即跑: 自动提权 + 绕过执行策略 |
+
+## 报错 "在此系统上禁止运行脚本"
+
+Windows 默认执行策略是 `Restricted`，`.ps1` 直接被拦。三选一，都不改系统全局设置：
+
+```powershell
+# 1) 最省事: 双击对应 .cmd (install-cp.cmd / setup-credential.cmd / uninstall-cp.cmd)
+#    自动弹 UAC 提权 + Bypass, 跑完窗口保留
+
+# 2) 当前窗口临时放行 (只影响这个窗口, 关掉就恢复)
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 3) 单次执行
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-cp.ps1
+```
 
 ## VM 测试步骤
 
