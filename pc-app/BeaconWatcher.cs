@@ -50,6 +50,8 @@ public sealed class BeaconWatcher : IDisposable
     private DateTimeOffset _belowSince = DateTimeOffset.MaxValue;
     private bool _locked;
     private DateTimeOffset _lastLockAt = DateTimeOffset.MinValue;
+    // 手动解锁后解除武装: 用户输了密码 = 人在电脑前, 重新看到手机信号前不再自动锁屏
+    private bool _requireSignalRecovery;
 
     // 实时信号: 所有见过的 iBeacon (目标+未知) -> (平滑RSSI, 最后收到时间)
     private readonly Dictionary<Guid, (double Avg, DateTimeOffset Last)> _beacons = new();
@@ -105,6 +107,7 @@ public sealed class BeaconWatcher : IDisposable
         _lastSeen = DateTimeOffset.MinValue;
         _belowSince = DateTimeOffset.MaxValue;
         _locked = false;
+        _requireSignalRecovery = false;
         _everSeen = false;
         lock (_sync) { _beacons.Clear(); }
         ProximityState.Write(false);   // 停止监听时告诉 CP: 不在附近, 别自动解锁
@@ -167,6 +170,11 @@ public sealed class BeaconWatcher : IDisposable
                 _everSeen = true;
                 _lastSeen = now;
                 _rssiAvg = avg;
+                if (_requireSignalRecovery)
+                {
+                    _requireSignalRecovery = false;
+                    Log?.Invoke("[重新武装] 重新看到手机信号, 自动锁屏恢复判定", LogLevel.Ok);
+                }
                 RssiUpdated?.Invoke((int)Math.Round(_rssiAvg));
             }
             return;
@@ -207,19 +215,25 @@ public sealed class BeaconWatcher : IDisposable
         var belowSeconds = _belowSince == DateTimeOffset.MaxValue
             ? 0 : (now - _belowSince).TotalSeconds;
 
-        var shouldLock = lost || belowSeconds >= GraceSeconds;
+        var shouldLock = (lost || belowSeconds >= GraceSeconds) && !_requireSignalRecovery;
 
-        // 防卡死: 锁过屏之后, 如果用户手动解锁回了桌面 (信号仍差, shouldLock 一直为 true,
-        // _locked 永不复位 → 之后永远不再锁屏)。检测到已解锁且距上次锁屏超过 5 秒就复位。
-        if (_locked && shouldLock && (now - _lastLockAt).TotalSeconds >= 5 && !IsSessionLocked())
+        // 防卡死 (只武装一次): 锁屏后用户手动解锁回了桌面, 但信号一直没回来 ——
+        // 此时用户人在电脑前 (密码都输了), 不能反复锁屏。
+        // 解除武装, 直到 OnReceived 重新看到目标信号才恢复。
+        if (_locked && (lost || belowSeconds >= GraceSeconds)
+            && (now - _lastLockAt).TotalSeconds >= 5 && !IsSessionLocked() && !_requireSignalRecovery)
         {
             _locked = false;
-            Log?.Invoke("[状态复位] 检测到已回到桌面但信号仍差, 将重新执行锁屏判定", LogLevel.Warn);
+            _requireSignalRecovery = true;
+            Log?.Invoke("[手动解锁] 检测到已回到桌面但手机信号未恢复, " +
+                        "暂停自动锁屏 (重新看到手机信号后恢复)", LogLevel.Warn);
         }
 
         if (shouldLock && !_locked)
         {
-            var reason = lost ? $"信号丢失 {lostSeconds:F0}s" : $"RSSI={_rssiAvg:F0} 低于阈值 {RssiThreshold} 持续 {belowSeconds:F0}s";
+            var reason = lost
+                ? $"信号丢失 {lostSeconds:F0}s (提示: 手机熄屏后安卓会暂停 BLE 广播, 点亮手机屏幕即可恢复)"
+                : $"RSSI={_rssiAvg:F0} 低于阈值 {RssiThreshold} 持续 {belowSeconds:F0}s";
             Log?.Invoke($"[触发锁屏] 原因: {reason}", LogLevel.Error);
             _locked = true;
             _lastLockAt = now;
