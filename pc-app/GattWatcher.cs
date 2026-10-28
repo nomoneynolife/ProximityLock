@@ -140,6 +140,13 @@ public sealed class GattWatcher : IProximityWatcher
 
         if (!_everConnected) return;   // 从未连上过 (启动预热期) 不判丢失
 
+        // 兜底: Windows 的断开事件有时延迟上报, 这里实时探测 —
+        // 发现已断开但计时还没开始, 立刻补上起点 (不依赖事件时机)
+        if (!connected && _disconnectedSince == DateTimeOffset.MaxValue)
+        {
+            _disconnectedSince = now;
+        }
+
         var lostSeconds = _disconnectedSince == DateTimeOffset.MaxValue
             ? 0 : (now - _disconnectedSince).TotalSeconds;
         var shouldLock = !connected && lostSeconds >= LostTimeoutSeconds && !_requireSignalRecovery;
