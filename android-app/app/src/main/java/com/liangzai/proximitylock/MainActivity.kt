@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 /** 自动开始开关固化: 存 SharedPreferences */
 object PrefStore {
     private const val KEY_AUTO_START = "auto_start"
+    private const val KEY_WANT_RUNNING = "want_running"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences("proximitylock", Context.MODE_PRIVATE)
@@ -25,6 +26,16 @@ object PrefStore {
 
     fun setAutoStart(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_AUTO_START, enabled).apply()
+    }
+
+    /**
+     * 用户是否希望服务运行 (默认 true)。
+     * 看门狗/开机自启只在它为 true 时才拉起服务, 这样「完全退出」不会被自动救回来。
+     */
+    fun isWantRunning(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WANT_RUNNING, true)
+
+    fun setWantRunning(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_WANT_RUNNING, enabled).apply()
     }
 }
 
@@ -55,9 +66,11 @@ class MainActivity : AppCompatActivity() {
 
         toggleBtn.setOnClickListener {
             if (BeaconService.isRunning) {
+                PrefStore.setWantRunning(this, false)   // 用户主动停止, 看门狗别救
                 stopService(Intent(this, BeaconService::class.java))
                 updateUi(false)
             } else {
+                PrefStore.setWantRunning(this, true)
                 if (ensurePermissions()) startBeacon()
             }
         }
@@ -80,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
         // 完全退出: 停后台服务 + 关掉本界面 (之后靠开机自启/手动打开才恢复)
         findViewById<Button>(R.id.btnExit).setOnClickListener {
+            PrefStore.setWantRunning(this, false)   // 标记"不要跑", 看门狗和开机自启都不再拉起
             stopService(Intent(this, BeaconService::class.java))
             Toast.makeText(this, "已退出, 后台服务已停止", Toast.LENGTH_SHORT).show()
             finishAndRemoveTask()
@@ -123,6 +137,7 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "这台手机不支持 BLE 广播 (bluetoothLeAdvertiser 为空)"
             return
         }
+        PrefStore.setWantRunning(this, true)
         ContextCompat.startForegroundService(this, Intent(this, BeaconService::class.java))
         updateUi(true)
     }

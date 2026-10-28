@@ -17,6 +17,7 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         if (!PrefStore.isAutoStart(context)) return
+        if (!PrefStore.isWantRunning(context)) return   // 用户点过「完全退出」就不自启
         if (BeaconService.isRunning) return
 
         try {

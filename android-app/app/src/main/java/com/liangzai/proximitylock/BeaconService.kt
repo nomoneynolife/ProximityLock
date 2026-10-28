@@ -52,17 +52,27 @@ class BeaconService : Service() {
         startAsForeground()
         startAdvertising()
         isRunning = true
+        PrefStore.setWantRunning(this, true)
+        RestartReceiver.schedule(this)   // 看门狗: 万一被 ROM 干掉, 60 秒内自动拉回
         return START_STICKY
     }
 
     /**
-     * 用户从最近任务里划掉 App: 服务继续跑 (前台服务 + START_STICKY)。
-     * 部分 ROM 会顺手掐掉, 这里再主动兜一次 —— 只要没被用户点"完全退出", 就恢复广播。
+     * 用户从最近任务里划掉 App:
+     * 正常 ROM 上前台服务会继续跑; 激进 ROM (vivo/小米等) 会把进程连同服务一起杀。
+     * 这里既尝试原地续命, 也安排一个 5 秒后的看门狗 —— 进程真被杀, 闹钟仍会把服务拉回来。
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!isRunning) {
-            startAdvertising()
-            isRunning = true
+        if (PrefStore.isWantRunning(this)) {
+            if (!isRunning) {
+                startAdvertising()
+                isRunning = true
+            }
+            RestartReceiver.schedule(this, 5_000L)
+            // 直接补一次 startService, 有的 ROM 允许同进程自启
+            try {
+                startService(Intent(this, BeaconService::class.java))
+            } catch (_: Exception) { }
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -72,6 +82,10 @@ class BeaconService : Service() {
         gattServer?.close()
         gattServer = null
         isRunning = false
+        if (!PrefStore.isWantRunning(this)) {
+            // 用户主动停止/完全退出: 撤掉看门狗, 别把自己救回来
+            RestartReceiver.cancel(this)
+        }
         // 停止时一并撤掉常驻通知 (完全退出时通知栏不留残影)
         if (Build.VERSION.SDK_INT >= 24) {
             stopForeground(STOP_FOREGROUND_REMOVE)

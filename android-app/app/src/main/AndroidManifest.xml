@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- 开机自启: 重启手机后自动恢复蓝牙连接服务 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 看门狗: 精确闹钟定时检查服务存活 (被 ROM 杀后台后自动拉回) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
@@ -39,6 +41,15 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <receiver
+            android:name=".RestartReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.liangzai.proximitylock.WATCHDOG" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".BootReceiver"
