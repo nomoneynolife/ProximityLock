@@ -15,7 +15,6 @@ namespace ProximityLock;
 
 public partial class MainWindow : Window
 {
-    private const string DefaultUuid = "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string AppName = "ProximityLock";
 
@@ -36,14 +35,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
-        // 启动时读取固化配置, 没有就用默认 UUID
-        UuidBox.Text = LoadConfigUuid() ?? DefaultUuid;
-        SeedBox.Text = LoadConfigSeed() ?? "";
-        UpdateRollingUiState();
-
-        RssiSlider.ValueChanged += (_, e) =>
-            RssiValueText.Text = $"{(int)e.NewValue} dBm (阈值)";
 
         // 实时信号面板 1 秒刷新一次
         _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -70,7 +61,8 @@ public partial class MainWindow : Window
             }
         };
 
-        AppendLog("就绪。先在安卓端开启广播, 再点“开始监听”。", LogLevel.Info);
+        AppendLog("就绪。先在 Windows 蓝牙设置里配对手机, 再在上面选中并点「开始监听」。", LogLevel.Info);
+        AppendLog("连接模式: 连接在线 = 锁屏界面自动解锁; 断开 = 锁屏。", LogLevel.Info);
         AppendLog("关闭或最小化窗口会缩到托盘, 托盘图标右键可退出。", LogLevel.Info);
         _uiReady = true;
     }
@@ -206,16 +198,6 @@ public partial class MainWindow : Window
             SetAutoStart(true);
             enabled = true;
         }
-        else if (enabled)
-        {
-            // 兼容旧版: 注册表里还是老参数的话升级成 --minimized --listen
-            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
-            var cur = key?.GetValue(AppName) as string ?? "";
-            if (!cur.Contains("--listen", StringComparison.OrdinalIgnoreCase))
-            {
-                SetAutoStart(true);
-            }
-        }
         AutoStartCheck.IsChecked = enabled;
     }
 
@@ -312,34 +294,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------- UUID / 滚动种子 配置固化 ----------
-
-    private static string? LoadConfigUuid()
-    {
-        try
-        {
-            if (!File.Exists(ConfigPath)) return null;
-            var json = JsonDocument.Parse(File.ReadAllText(ConfigPath));
-            return json.RootElement.TryGetProperty("uuid", out var u) ? u.GetString() : null;
-        }
-        catch { return null; }
-    }
-
-    private static string? LoadConfigSeed()
-    {
-        try
-        {
-            if (!File.Exists(ConfigPath)) return null;
-            var json = JsonDocument.Parse(File.ReadAllText(ConfigPath));
-            return json.RootElement.TryGetProperty("seed", out var s) ? s.GetString() : null;
-        }
-        catch { return null; }
-    }
-
-    private static void SaveConfig(string uuid, string seed)
-    {
-        SaveConfigFull(uuid, seed, LoadConfigDevice());
-    }
+    // ---------- 连接模式: 已配对 BLE 设备 ----------
 
     private static (ulong Address, string Name)? LoadConfigDevice()
     {
@@ -355,151 +310,17 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
-    private static void SaveConfigFull(string uuid, string seed, (ulong Address, string Name)? device)
+    private static void SaveSelectedDeviceStatic(PairedDevice? device)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
         File.WriteAllText(ConfigPath,
             JsonSerializer.Serialize(new
             {
-                uuid,
-                seed,
                 deviceAddress = device?.Address.ToString() ?? null,
                 deviceName = device?.Name ?? null,
             },
             new JsonSerializerOptions { WriteIndented = true }));
     }
-
-    private void SaveSelectedDevice()
-    {
-        SaveConfigFull(UuidBox.Text.Trim(), EffectiveSeed,
-            DeviceBox.SelectedItem as PairedDevice is { } d ? (d.Address, d.Name) : null);
-    }
-
-    private string EffectiveSeed
-        => RollingUuid.IsValidSeed(SeedBox.Text) ? SeedBox.Text.Trim().ToLowerInvariant() : "";
-
-    /// <summary>滚动模式开关变化: 固定 UUID 失效置灰</summary>
-    private void UpdateRollingUiState()
-    {
-        var rolling = EffectiveSeed.Length > 0;
-        UuidBox.IsEnabled = !rolling;
-        UuidBox.Opacity = rolling ? 0.5 : 1.0;
-    }
-
-    /// <summary>种子框内容变化 → 校验并立即固化 (输入合法 hex 才生效, 不用单独按保存)</summary>
-    private void SeedBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (SeedBox == null || !_uiReady) return; // XAML 初始化中触发
-        var seed = EffectiveSeed;
-        SaveConfig(UuidBox.Text.Trim(), seed);
-        UpdateRollingUiState();
-        if (seed.Length > 0 && SeedBox.Text.Trim().Length == 32)
-        {
-            // 输满 32 位合法 hex 时提示一次并热切模式
-            AppendLog("滚动 UUID 已启用: 两端种子一致才会互相识别, 手机在跑的话重启广播生效。", LogLevel.Ok);
-        }
-        RestartWatcherIfRunning();
-    }
-
-    /// <summary>剪贴板经常被其他程序短暂锁住 (CLIPBRD_E_CANT_OPEN), 重试几次</summary>
-    private static bool TrySetClipboard(string text)
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            try
-            {
-                System.Windows.Clipboard.SetText(text);
-                return true;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                System.Threading.Thread.Sleep(120);
-            }
-        }
-        return false;
-    }
-
-    private void SeedGenBtn_Click(object sender, RoutedEventArgs e)
-    {
-        SeedBox.Text = RollingUuid.RandomSeed();   // TextChanged 会自动保存
-        if (TrySetClipboard(SeedBox.Text))
-            AppendLog("已生成滚动种子并复制到剪贴板 → 粘贴到手机端「滚动 UUID 种子」框, 两端一致即可。", LogLevel.Ok);
-        else
-            AppendLog("种子已生成, 但复制剪贴板失败 (被其他程序占用), 手动复制输入框内容。", LogLevel.Warn);
-    }
-
-    private void SeedCopyBtn_Click(object sender, RoutedEventArgs e)
-    {
-        if (TrySetClipboard(SeedBox.Text.Trim()))
-            AppendLog("种子已复制到剪贴板。", LogLevel.Info);
-        else
-            AppendLog("复制失败: 剪贴板被其他程序占用, 稍后再试或手动复制。", LogLevel.Warn);
-    }
-
-    private void SeedClearBtn_Click(object sender, RoutedEventArgs e)
-    {
-        SeedBox.Text = "";   // TextChanged 会保存空种子并热切回固定模式
-        AppendLog("已清除种子, 回到固定 UUID 模式。", LogLevel.Info);
-    }
-
-    private void RandBtn_Click(object sender, RoutedEventArgs e)
-    {
-        UuidBox.Text = Guid.NewGuid().ToString().ToUpper();
-        SaveConfig(UuidBox.Text.Trim(), EffectiveSeed);
-        AppendLog("已生成随机 UUID, 手机端填同一个后点“保存”固化。", LogLevel.Info);
-    }
-
-    private void CopyBtn_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            System.Windows.Clipboard.SetText(UuidBox.Text.Trim());
-            AppendLog("UUID 已复制到剪贴板。", LogLevel.Info);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"复制失败: {ex.Message}", LogLevel.Warn);
-        }
-    }
-
-    private void DefaultBtn_Click(object sender, RoutedEventArgs e)
-    {
-        UuidBox.Text = DefaultUuid;
-        SaveConfig(DefaultUuid, EffectiveSeed);
-        RestartWatcherIfRunning();
-        AppendLog("已恢复默认 UUID 并固化。", LogLevel.Ok);
-    }
-
-    private void SaveBtn_Click(object sender, RoutedEventArgs e)
-    {
-        if (!Guid.TryParse(UuidBox.Text.Trim(), out _))
-        {
-            AppendLog("UUID 格式不对, 没保存。", LogLevel.Warn);
-            return;
-        }
-        SaveConfig(UuidBox.Text.Trim(), EffectiveSeed);
-        RestartWatcherIfRunning();
-        AppendLog($"UUID 已固化: {UuidBox.Text.Trim()} (下次开机自动加载)", LogLevel.Ok);
-    }
-
-    /// <summary>UUID 变了, 正在监听的话停掉让用户重新开始</summary>
-    private void RestartWatcherIfRunning()
-    {
-        if (_watcher == null) return;
-        _uiTimer.Stop();
-        _watcher.Stop();
-        _watcher.Dispose();
-        _watcher = null;
-        SignalList.Items.Clear();
-        NoSignalText.Text = "配置已变更, 重新点“开始监听”";
-        NoSignalText.Visibility = Visibility.Visible;
-        StartBtn.IsEnabled = true;
-        StopBtn.IsEnabled = false;
-        UuidBox.IsEnabled = true;
-        DeviceBox.IsEnabled = true;
-    }
-
-    // ---------- 连接模式: 已配对 BLE 设备 ----------
 
     /// <summary>枚举系统里已配对的 BLE 设备 (手机在 Windows 蓝牙设置里配对一次即可出现在这里)</summary>
     private async Task LoadPairedDevicesAsync()
@@ -515,7 +336,7 @@ public partial class MainWindow : Window
                 var addr = ParseBleAddress(di.Id);
                 if (addr == null) continue;
                 var name = string.IsNullOrWhiteSpace(di.Name) ? $"BLE 设备 ({di.Id[^8..]})" : di.Name;
-                items.Add(new PairedDevice($"{name}", addr.Value, name, di.Id));
+                items.Add(new PairedDevice(name, addr.Value, name, di.Id));
             }
 
             // 恢复上次的选择
@@ -558,48 +379,25 @@ public partial class MainWindow : Window
     private void DeviceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_uiReady || DeviceBox == null) return;
-        SaveSelectedDevice();
+        SaveSelectedDeviceStatic(DeviceBox.SelectedItem as PairedDevice);
     }
 
     // ---------- 监听控制 ----------
 
     private void StartBtn_Click(object sender, RoutedEventArgs e)
     {
-        if (!Guid.TryParse(UuidBox.Text.Trim(), out var uuid))
+        if (DeviceBox.SelectedItem is not PairedDevice dev)
         {
-            AppendLog("UUID 格式不对, 检查一下。", LogLevel.Warn);
-            return;
-        }
-        if (!int.TryParse(LostTimeoutBox.Text.Trim(), out var lostTimeout) || lostTimeout < 1)
-        {
-            AppendLog("信号丢失判定时间最低 1 秒。", LogLevel.Warn);
+            AppendLog("先在列表里选中你的手机 (没有就先去 Windows 蓝牙设置配对, 或点「刷新设备」)。",
+                LogLevel.Warn);
             return;
         }
 
         _watcher?.Dispose();
-        SaveSelectedDevice();
+        SaveSelectedDeviceStatic(dev);
 
-        if (DeviceBox.SelectedItem is PairedDevice dev)
-        {
-            // 连接模式: GATT 长连接, 连着=解锁, 断开=锁屏 (不看 RSSI)
-            _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name,
-                (int)RssiSlider.Value, Math.Min(lostTimeout, 2))
-            {
-                TargetUuid = uuid,
-                SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
-            };
-            AppendLog($"连接模式: 已选设备 {dev.Display}。判定只看连接 — 连着=在旁边(自动解锁), 断开=锁屏。", LogLevel.Info);
-        }
-        else
-        {
-            // 广播模式: 扫 iBeacon RSSI
-            _watcher = new BeaconWatcher(uuid, (int)RssiSlider.Value, lostTimeout)
-            {
-                SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
-            };
-            if (EffectiveSeed.Length > 0)
-                AppendLog("滚动 UUID 模式: 正在按种子动态识别目标手机。", LogLevel.Info);
-        }
+        // 连接模式: GATT 长连接, 连着=解锁, 断开=锁屏 (2 秒防抖)
+        _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name, lostTimeout: 2);
         _watcher.Log += (msg, level) => Dispatcher.Invoke(() => AppendLog(msg, level));
 
         _watcher.Start();
@@ -607,7 +405,6 @@ public partial class MainWindow : Window
 
         StartBtn.IsEnabled = false;
         StopBtn.IsEnabled = true;
-        UuidBox.IsEnabled = false;
         DeviceBox.IsEnabled = false;
     }
 
@@ -624,9 +421,7 @@ public partial class MainWindow : Window
 
         StartBtn.IsEnabled = true;
         StopBtn.IsEnabled = false;
-        UuidBox.IsEnabled = true;
         DeviceBox.IsEnabled = true;
-        RssiValueText.Text = $"{(int)RssiSlider.Value} dBm (阈值)";
     }
 
     private void TestLockBtn_Click(object sender, RoutedEventArgs e)
@@ -640,57 +435,23 @@ public partial class MainWindow : Window
         if (_watcher == null) return;
 
         SignalList.Items.Clear();
-
-        // 连接模式: 按连接状态显示 (熄屏不广播, RSSI 不是主要依据)
-        if (_watcher is GattWatcher g)
+        if (_watcher.IsConnected)
         {
-            if (g.IsConnected)
-            {
-                NoSignalText.Visibility = Visibility.Collapsed;
-                SignalList.Items.Add(new TextBlock
-                {
-                    Padding = new Thickness(0, 2, 0, 2),
-                    FontFamily = new FontFamily("Consolas"),
-                    FontSize = 12,
-                    Foreground = Brushes.Green,
-                    FontWeight = FontWeights.Bold,
-                    Text = $"[目标手机·已连接] {g.DeviceName}  GATT 在线 (断开 {g.LostTimeoutSeconds}s 后锁屏)",
-                });
-            }
-            else
-            {
-                NoSignalText.Text = $"{g.DeviceName} 未连接 — 手机在蓝牙范围内吗? (断开超过 {g.LostTimeoutSeconds}s 锁屏; 连上后锁屏界面会自动解锁)";
-                NoSignalText.Visibility = Visibility.Visible;
-            }
-            return;
-        }
-
-        // 广播模式
-        var advList = _watcher.Snapshot();
-        if (advList.Count == 0)
-        {
-            NoSignalText.Text = "正在扫描, 未发现目标手机 (手机开广播了吗? UUID 一致吗?)";
-            NoSignalText.Visibility = Visibility.Visible;
-            return;
-        }
-        NoSignalText.Visibility = Visibility.Collapsed;
-
-        foreach (var b in advList)
-        {
-            // 绿 = 达到阈值 (在附近, 可自动解锁); 橙 = 收得到但低于阈值 (远处, 不算在附近)
-            bool close = b.AvgRssi >= _watcher.RssiThreshold;
-            var tb = new TextBlock
+            NoSignalText.Visibility = Visibility.Collapsed;
+            SignalList.Items.Add(new TextBlock
             {
                 Padding = new Thickness(0, 2, 0, 2),
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12,
-                Foreground = close ? Brushes.Green : Brushes.Orange,
+                Foreground = Brushes.Green,
                 FontWeight = FontWeights.Bold,
-                Text = close
-                    ? $"[目标手机·在附近] {b.Uuid}  {b.AvgRssi} dBm  · {b.AgeSeconds:F0}s 前"
-                    : $"[目标手机·信号弱] {b.Uuid}  {b.AvgRssi} dBm (< 阈值 {_watcher.RssiThreshold}, 会触发锁屏)",
-            };
-            SignalList.Items.Add(tb);
+                Text = $"[已连接] {_watcher.DeviceName}  蓝牙长连接在线 (断开 {_watcher.LostTimeoutSeconds}s 后锁屏)",
+            });
+        }
+        else
+        {
+            NoSignalText.Text = $"{_watcher.DeviceName} 未连接 — 等待自动重连… (断开超过 {_watcher.LostTimeoutSeconds}s 会锁屏)";
+            NoSignalText.Visibility = Visibility.Visible;
         }
     }
 

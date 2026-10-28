@@ -11,12 +11,12 @@ import android.bluetooth.le.AdvertiseSettings
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import java.nio.ByteBuffer
 import java.util.UUID
 
 /**
- * 前台服务: 把手机伪装成一个 iBeacon 持续广播。
- * PC 端 ProximityLock 监听该 UUID 的 RSSI 来判定手机远近。
+ * 前台服务: 发出「可连接」的 BLE 广播, 并运行一个最小 GATT 服务器。
+ * PC 端 (已与本机配对) 通过配对缓存连上来, 维持长连接 —
+ * 连着 = 人在旁边, 断开 = 人走了。不需要 UUID / RSSI。
  */
 class BeaconService : Service() {
 
@@ -27,9 +27,8 @@ class BeaconService : Service() {
 
         private const val CHANNEL_ID = "beacon_channel"
         private const val NOTIF_ID = 1
-        private const val TX_POWER_CALIBRATION: Byte = -59 // 距手机 1 米处的参考 RSSI
 
-        // 连接模式: PC 端连接该 GATT 服务并读取令牌验证身份 (与 PC 端 GattWatcher 对应)
+        // 最小 GATT 服务: Windows 连接后服务发现不为空, 连接更稳
         val SERVICE_UUID: UUID = UUID.fromString("9A660001-C77B-4A9D-B5E3-1D6B7A9E2C11")
         val CHAR_UUID: UUID = UUID.fromString("9A660002-C77B-4A9D-B5E3-1D6B7A9E2C11")
     }
@@ -42,9 +41,6 @@ class BeaconService : Service() {
     private var gattServer: android.bluetooth.BluetoothGattServer? = null
 
     private val callback = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-            // 广播成功, 无需处理
-        }
         override fun onStartFailure(errorCode: Int) {
             isRunning = false
             stopSelf()
@@ -59,7 +55,6 @@ class BeaconService : Service() {
     }
 
     override fun onDestroy() {
-        rotateHandler.removeCallbacks(rotateRunnable)
         advertiser?.stopAdvertising(callback)
         gattServer?.close()
         gattServer = null
@@ -69,58 +64,23 @@ class BeaconService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private val rotateHandler = android.os.Handler(android.os.Looper.getMainLooper())
-
-    /** 时间片切换时重启广播, 换上新的滚动 UUID */
-    private val rotateRunnable = Runnable {
-        if (isRunning) startAdvertising()
-    }
-
     private fun startAdvertising() {
-        val seed = UuidStore.getSeed(this)
-        val rolling = RollingUuid.isValidSeed(seed)
-
-        // 滚动模式: 按种子+时间片推导 UUID; 否则用固定 UUID
-        val uuid = if (rolling) {
-            RollingUuid.derive(seed, RollingUuid.sliceAt())
-        } else {
-            try {
-                UUID.fromString(UuidStore.get(this))
-            } catch (_: IllegalArgumentException) {
-                UUID.fromString(UuidStore.DEFAULT)
-            }
-        }
-
-        advertiser?.stopAdvertising(callback)
-
-        val payload = buildIBeaconPayload(uuid)
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            // 可连接: 连接模式下 PC 端要能连上来 (iBeacon 走广播包, 服务 UUID 走扫描响应)
-            .setConnectable(true)
+            .setConnectable(true)   // PC 端要能连上来 (GATT 长连接)
             .build()
 
         val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
-            .addManufacturerData(0x004C, payload) // Apple 厂商 ID, iBeacon 走这里
+            .setIncludeDeviceName(true)   // 广播设备名, 方便在 PC 端识别
             .build()
-        // 注: 服务 UUID 不放广播里 (31 字节放不下 iBeacon+UUID),
-        // PC 端连接后用 GetGattServicesAsync 主动发现, 不依赖广播里的 UUID。
 
+        advertiser?.stopAdvertising(callback)
         advertiser?.startAdvertising(settings, data, callback)
         startGattServer()
-
-        // 滚动模式: 定时到下一个分钟整点换 UUID
-        rotateHandler.removeCallbacks(rotateRunnable)
-        if (rolling) {
-            val nextBoundaryMs = (RollingUuid.sliceAt() + 1) * RollingUuid.SLICE_SECONDS * 1000
-            val delay = (nextBoundaryMs - System.currentTimeMillis()).coerceAtLeast(1000L)
-            rotateHandler.postDelayed(rotateRunnable, delay)
-        }
     }
 
-    /** 连接模式: PC 读取令牌特征值验证"连上的真是我们的手机" */
+    /** 最小 GATT 服务器: 一个服务 + 一个只读特征值 (返回版本标识) */
     private fun startGattServer() {
         if (gattServer != null) return
         val server = try {
@@ -136,6 +96,7 @@ class BeaconService : Service() {
             CHAR_UUID,
             android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ,
             android.bluetooth.BluetoothGattCharacteristic.PERMISSION_READ)
+        char.value = "ProximityLock-v3".toByteArray()
         service.addCharacteristic(char)
         server.addService(service)
         gattServer = server
@@ -147,7 +108,7 @@ class BeaconService : Service() {
             offset: Int, characteristic: android.bluetooth.BluetoothGattCharacteristic?
         ) {
             val value = if (characteristic?.uuid == CHAR_UUID) {
-                RollingUuid.tokenBytes(UuidStore.getSeed(this@BeaconService), currentFixedUuid())
+                "ProximityLock-v3".toByteArray()
             } else null
             gattServer?.sendResponse(
                 device, requestId,
@@ -157,36 +118,17 @@ class BeaconService : Service() {
         }
     }
 
-    private fun currentFixedUuid(): UUID = try {
-        UUID.fromString(UuidStore.get(this))
-    } catch (_: IllegalArgumentException) {
-        UUID.fromString(UuidStore.DEFAULT)
-    }
-
-    /** 组装 iBeacon 帧: 0x02,0x15 + UUID(16B) + Major(2B) + Minor(2B) + TxPower(1B) */
-    private fun buildIBeaconPayload(uuid: UUID): ByteArray {
-        val bb = ByteBuffer.allocate(23)
-        bb.put(0x02).put(0x15)
-        val bytes = ByteBuffer.allocate(16).putLong(uuid.mostSignificantBits)
-            .putLong(uuid.leastSignificantBits).array()
-        bb.put(bytes)
-        bb.putShort(1)   // Major
-        bb.putShort(1)   // Minor
-        bb.put(TX_POWER_CALIBRATION)
-        return bb.array()
-    }
-
     private fun startAsForeground() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "接近解锁广播", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL_ID, "接近解锁服务", NotificationManager.IMPORTANCE_LOW)
             )
         }
         val notification: Notification = if (Build.VERSION.SDK_INT >= 33) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Proximity Lock")
-                .setContentText("正在广播 Beacon, PC 端正在监听")
+                .setContentText("蓝牙连接模式运行中, PC 端保持连接")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
                 .build()
@@ -194,7 +136,7 @@ class BeaconService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Proximity Lock")
-                .setContentText("正在广播 Beacon, PC 端正在监听")
+                .setContentText("蓝牙连接模式运行中, PC 端保持连接")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
                 .build()

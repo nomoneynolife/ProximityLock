@@ -7,123 +7,13 @@
     android:padding="24dp">
 
     <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Beacon UUID (与 PC 端一致)"
-        android:textSize="13sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="6dp" />
-
-    <EditText
-        android:id="@+id/uuidEdit"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fontFamily="monospace"
-        android:textSize="12sp"
-        android:hint="E2C56DB5-DFFB-48D2-B060-D0F5A71096E0" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="8dp">
-
-        <Button
-            android:id="@+id/btnRandom"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="随机" />
-
-        <Button
-            android:id="@+id/btnCopy"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="复制" />
-
-        <Button
-            android:id="@+id/btnDefault"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="恢复默认" />
-
-        <Button
-            android:id="@+id/btnSave"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="保存" />
-    </LinearLayout>
-
-    <TextView
         android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="未运行 · 点下面按钮开启"
         android:textSize="16sp"
         android:gravity="center"
-        android:layout_marginTop="28dp"
         android:layout_marginBottom="24dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="滚动 UUID 种子 (防伪造, 与 PC 端一致, 留空=固定 UUID)"
-        android:textSize="13sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="6dp" />
-
-    <EditText
-        android:id="@+id/seedEdit"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fontFamily="monospace"
-        android:textSize="12sp"
-        android:hint="32 位 hex 种子, 从 PC 端复制粘贴到这里"
-        android:singleLine="true" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="8dp">
-
-        <Button
-            android:id="@+id/btnSeedPaste"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="粘贴保存" />
-
-        <Button
-            android:id="@+id/btnSeedGen"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="生成" />
-
-        <Button
-            android:id="@+id/btnSeedCopy"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="复制" />
-
-        <Button
-            android:id="@+id/btnSeedClear"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="清除" />
-    </LinearLayout>
 
     <Button
         android:id="@+id/toggleBtn"
@@ -147,6 +37,15 @@
         android:layout_height="44dp"
         android:layout_marginTop="12dp"
         android:textAllCaps="false"
-        android:text="申请电池白名单 (防熄屏断广播)" />
+        android:text="申请电池白名单 (广播更稳定)" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:textSize="13sp"
+        android:textColor="#888888"
+        android:gravity="center"
+        android:text="在 Windows 蓝牙设置里配对一次本手机, PC 端选中它即可。\n连接模式: PC 与手机保持蓝牙长连接, 连着=解锁, 断开=锁屏。" />
 
 </LinearLayout>

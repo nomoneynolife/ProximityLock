@@ -1,24 +1,25 @@
 namespace ProximityLock;
 
+public enum LogLevel { Info, Ok, Warn, Error }
+
 /// <summary>
-/// 接近监听器的公共接口, 广播模式 (BeaconWatcher) 和连接模式 (GattWatcher) 可互换。
-/// 两者都内部完成: 接近判定 → 写 state.ini (给 CP 自动解锁用) + 触发 LockWorkStation。
+/// 接近监听器接口。连接模式 (GattWatcher): 与配对手机维持 GATT 长连接,
+/// 连着 = 人在旁边 (state.ini 写 near=1, 锁屏界面自动解锁), 断开 = 锁屏。
 /// </summary>
 public interface IProximityWatcher : IDisposable
 {
     event Action<string, LogLevel>? Log;
-    event Action<int>? RssiUpdated;
+    event Action<bool>? LockStateChanged;
 
-    Guid TargetUuid { get; set; }
-    int RssiThreshold { get; set; }
+    /// <summary>断开后的防抖秒数</summary>
     int LostTimeoutSeconds { get; set; }
 
-    /// <summary>滚动 UUID 种子 (32位hex), 空 = 固定 UUID 模式</summary>
-    string? SeedHex { get; set; }
+    /// <summary>GATT 连接是否在线</summary>
+    bool IsConnected { get; }
+
+    /// <summary>设备显示名 (日志/UI 用)</summary>
+    string DeviceName { get; }
 
     void Start();
     void Stop();
-
-    /// <summary>给 UI 的实时信号快照 (只含目标手机)</summary>
-    List<BeaconInfo> Snapshot();
 }
