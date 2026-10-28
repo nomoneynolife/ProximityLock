@@ -17,8 +17,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="130"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="Beacon UUID (与安卓端一致)" FontWeight="SemiBold" Margin="0,0,0,4"/>
@@ -86,7 +86,7 @@
                   Content="手机靠近自动解锁 (勾选后自动安装解锁组件, 需 UAC 授权; 仅本地账号)"
                   Checked="AutoUnlock_Changed" Unchecked="AutoUnlock_Changed"/>
 
-        <TextBlock Grid.Row="10" Text="实时信号 (绿色 = 已绑定的目标手机)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="10" Text="实时信号 (绿色 = 在附近, 橙色 = 信号弱会锁屏)" FontWeight="SemiBold" Margin="0,0,0,4"/>
         <Border Grid.Row="11" Background="#F4F4F4" CornerRadius="6" Padding="8">
             <Grid>
                 <TextBlock x:Name="NoSignalText" Foreground="#999999" VerticalAlignment="Top"
@@ -98,5 +98,14 @@
         <RichTextBox Grid.Row="12" x:Name="LogBox" Margin="0,12,0,0" Background="#FAFAFA"
                      BorderBrush="#DDDDDD" BorderThickness="1" IsReadOnly="True"
                      VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
+
+        <TextBlock Grid.Row="13" HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="11" Foreground="#999999">
+            <Run x:Name="VersionRun" Text="ProximityLock"/>
+            <Run Text=" · 开源地址:"/>
+            <Hyperlink NavigateUri="https://github.com/nomoneynolife/ProximityLock"
+                       RequestNavigate="FooterLink_Click" Foreground="#0066CC" TextDecorations="{x:Null}">
+                <Run Text="github.com/nomoneynolife/ProximityLock"/>
+            </Hyperlink>
+        </TextBlock>
     </Grid>
 </Window>

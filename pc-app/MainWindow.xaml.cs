@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         InitTrayIcon();
         InitAutoStart();
         InitAutoUnlock();
+        InitVersionFooter();
 
         Loaded += (_, _) =>
         {
@@ -71,6 +72,26 @@ public partial class MainWindow : Window
     }
 
     private bool _uiReady;
+
+    /// <summary>底部版本号跟随 csproj 的 Version</summary>
+    private void InitVersionFooter()
+    {
+        var v = typeof(MainWindow).Assembly.GetName().Version;
+        if (v != null) VersionRun.Text = $"ProximityLock v{v.Major}.{v.Minor}.{v.Build}";
+    }
+
+    private void FooterLink_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "https://github.com/nomoneynolife/ProximityLock") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开链接失败: {ex.Message}", LogLevel.Warn);
+        }
+    }
 
     // ---------- 托盘 ----------
 
@@ -345,31 +366,39 @@ public partial class MainWindow : Window
         RestartWatcherIfRunning();
     }
 
+    /// <summary>剪贴板经常被其他程序短暂锁住 (CLIPBRD_E_CANT_OPEN), 重试几次</summary>
+    private static bool TrySetClipboard(string text)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(text);
+                return true;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                System.Threading.Thread.Sleep(120);
+            }
+        }
+        return false;
+    }
+
     private void SeedGenBtn_Click(object sender, RoutedEventArgs e)
     {
         SeedBox.Text = RollingUuid.RandomSeed();   // TextChanged 会自动保存
-        try
-        {
-            System.Windows.Clipboard.SetText(SeedBox.Text);
+        if (TrySetClipboard(SeedBox.Text))
             AppendLog("已生成滚动种子并复制到剪贴板 → 粘贴到手机端「滚动 UUID 种子」框, 两端一致即可。", LogLevel.Ok);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"种子已生成, 但复制剪贴板失败: {ex.Message} (手动复制输入框内容)", LogLevel.Warn);
-        }
+        else
+            AppendLog("种子已生成, 但复制剪贴板失败 (被其他程序占用), 手动复制输入框内容。", LogLevel.Warn);
     }
 
     private void SeedCopyBtn_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            System.Windows.Clipboard.SetText(SeedBox.Text.Trim());
+        if (TrySetClipboard(SeedBox.Text.Trim()))
             AppendLog("种子已复制到剪贴板。", LogLevel.Info);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"复制失败: {ex.Message}", LogLevel.Warn);
-        }
+        else
+            AppendLog("复制失败: 剪贴板被其他程序占用, 稍后再试或手动复制。", LogLevel.Warn);
     }
 
     private void SeedClearBtn_Click(object sender, RoutedEventArgs e)
