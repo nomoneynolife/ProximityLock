@@ -2,16 +2,16 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Windows.Devices.Bluetooth;
-using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Storage.Streams;
 
 namespace ProximityLock;
 
 /// <summary>
-/// 连接模式监听器: 与手机维持 GATT 长连接, 用「连接是否在线」判定远近。
-/// 广播模式的痛点 (熄屏暂停广播 → 信号丢失误判) 在连接模式下不存在:
-/// 连接不随手机熄屏断开, 断开 = 人真的走了。
+/// 连接模式监听器: 与手机维持 GATT 长连接, 判定只看连接状态 —
+/// 连着 = 手机在旁边 (state.ini 写 near=1, 锁屏界面会自动解锁);
+/// 断开 = 人走了 (短暂防抖后锁屏)。
+/// 不扫广播、不看 RSSI, 熄屏暂停广播的问题在连接模式下不存在。
 /// 对应安卓端 BeaconService 的 GATT 服务器 (SERVICE_UUID / CHAR_UUID)。
 /// </summary>
 public sealed class GattWatcher : IProximityWatcher
@@ -28,21 +28,17 @@ public sealed class GattWatcher : IProximityWatcher
 
     private BluetoothLEDevice? _device;
     private GattSession? _session;
-    private BluetoothLEAdvertisementWatcher? _advWatcher; // 断连时手机会恢复广播, 用来显示 RSSI
     private readonly System.Timers.Timer _checkTimer;
     private readonly System.Timers.Timer _retryTimer;
 
     public Guid TargetUuid { get; set; }
-    public int RssiThreshold { get; set; } = -65;
-    public int LostTimeoutSeconds { get; set; } = 8;
+    public int RssiThreshold { get; set; } = -65;      // 连接模式不使用
+    public int LostTimeoutSeconds { get; set; } = 2;   // 断开后的防抖时间 (防瞬时抖动误锁)
     public string? SeedHex { get; set; }
 
     /// <summary>GATT 连接是否在线</summary>
     public bool IsConnected =>
         _device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
-
-    /// <summary>最近一次从广播里看到的 RSSI (断连时才有广播; 连接中广播停止, 显示 -)</summary>
-    public int LastRssi { get; private set; } = int.MinValue;
 
     public string DeviceName => _deviceName;
 
@@ -50,16 +46,14 @@ public sealed class GattWatcher : IProximityWatcher
     private bool _everConnected;
     private bool _tokenOk;
     private DateTimeOffset _disconnectedSince = DateTimeOffset.MaxValue;
-    private DateTimeOffset _lastRssiAt = DateTimeOffset.MinValue;
 
-    // 锁屏判定 (与 BeaconWatcher 相同的防抖/解除武装逻辑)
-    private const int GraceSeconds = 3;
+    // 锁屏判定 (与 BeaconWatcher 相同的解除武装逻辑)
     private bool _locked;
     private DateTimeOffset _lastLockAt = DateTimeOffset.MinValue;
     private bool _requireSignalRecovery;
 
     public event Action<string, LogLevel>? Log;
-    public event Action<int>? RssiUpdated;
+    public event Action<int>? RssiUpdated;   // 连接模式不触发
     public event Action<bool>? LockStateChanged;
 
     public GattWatcher(ulong address, string? deviceId, string deviceName,
@@ -70,12 +64,12 @@ public sealed class GattWatcher : IProximityWatcher
         _deviceName = string.IsNullOrWhiteSpace(deviceName) ? $"BLE:{address:X12}" : deviceName;
         TargetUuid = Guid.Empty;
         RssiThreshold = rssiThreshold;
-        LostTimeoutSeconds = lostTimeout;
+        LostTimeoutSeconds = Math.Max(1, lostTimeout);
 
-        _checkTimer = new System.Timers.Timer(1000);
+        _checkTimer = new System.Timers.Timer(500);
         _checkTimer.Elapsed += (_, _) => Evaluate();
 
-        _retryTimer = new System.Timers.Timer(15000);
+        _retryTimer = new System.Timers.Timer(10000);
         _retryTimer.Elapsed += (_, _) => { if (_device == null) _ = ConnectAsync(); };
     }
 
@@ -83,16 +77,7 @@ public sealed class GattWatcher : IProximityWatcher
     {
         _checkTimer.Start();
         _retryTimer.Start();
-
-        // 断连时手机恢复广播, 监听它拿 RSSI 给 UI 显示 (连接中手机不广播, RSSI 会停在旧值)
-        _advWatcher = new BluetoothLEAdvertisementWatcher
-        {
-            ScanningMode = BluetoothLEScanningMode.Active,
-        };
-        _advWatcher.Received += OnAdvReceived;
-        try { _advWatcher.Start(); } catch { /* 蓝牙不可用时不影响连接本身 */ }
-
-        Log?.Invoke($"连接模式: 正在连接 {_deviceName}…", LogLevel.Info);
+        Log?.Invoke($"连接模式: 正在连接 {_deviceName}… (连着=解锁, 断开={LostTimeoutSeconds}s后锁屏)", LogLevel.Info);
         _ = ConnectAsync();
     }
 
@@ -120,8 +105,8 @@ public sealed class GattWatcher : IProximityWatcher
             }
             if (device == null)
             {
-                // 手机当前不在广播 (熄屏/不在范围) —— 15 秒后重试, 不锁屏 (还没建立过连接)
-                Log?.Invoke("暂未连上 (手机没在广播?), 15 秒后自动重试。首次连接建议先点亮手机屏幕。",
+                // 手机当前不在广播 (不在范围/蓝牙关) —— 10 秒后重试, 不锁屏 (还没建立过连接)
+                Log?.Invoke("暂未连上 (手机不在范围或没在广播?), 10 秒后自动重试。",
                     LogLevel.Info);
                 return;
             }
@@ -132,12 +117,10 @@ public sealed class GattWatcher : IProximityWatcher
             if (_session != null)
             {
                 _session.MaintainConnection = true;   // 关键: 系统保持长连接, 断了自动重连
-                _session.SessionStatusChanged += (_, args) =>
-                    Log?.Invoke($"GATT 会话状态: {args.Status}", LogLevel.Info);
             }
 
             _everConnected = true;
-            Log?.Invoke($"已连接 {_deviceName} (连接模式, 熄屏不再导致误判)。", LogLevel.Ok);
+            Log?.Invoke($"已连接 {_deviceName}。手机在旁边 → 锁屏界面会自动解锁。", LogLevel.Ok);
             _ = VerifyTokenAsync();
         }
         catch (Exception ex)
@@ -155,8 +138,7 @@ public sealed class GattWatcher : IProximityWatcher
             var svc = services.Services.FirstOrDefault(s => s.Uuid == ServiceUuid);
             if (svc == null)
             {
-                Log?.Invoke("未找到 ProximityLock 服务 (手机端没在广播服务?), 跳过令牌验证。",
-                    LogLevel.Warn);
+                Log?.Invoke("未找到 ProximityLock 服务, 跳过令牌验证。", LogLevel.Warn);
                 _tokenOk = true;   // 连得上就当是自己人, 验证失败不阻断 (兼容旧版手机端)
                 return;
             }
@@ -224,45 +206,6 @@ public sealed class GattWatcher : IProximityWatcher
         return Convert.FromHexString(hex);
     }
 
-    private void OnAdvReceived(BluetoothLEAdvertisementWatcher sender,
-        BluetoothLEAdvertisementReceivedEventArgs args)
-    {
-        // 手机用随机地址 (RPA) 广播, 地址会变; 按地址过滤会漏 → 解析 iBeacon 帧按 UUID 匹配。
-        // 只用于 UI 显示 RSSI, 判定本身靠 GATT 连接状态。
-        foreach (var section in args.Advertisement.ManufacturerData)
-        {
-            if (section.CompanyId != 0x004C) continue;
-            var data = new byte[section.Data.Length];
-            using (var reader = DataReader.FromBuffer(section.Data))
-            {
-                reader.ReadBytes(data);
-            }
-            if (data.Length < 23 || data[0] != 0x02 || data[1] != 0x15) continue;
-
-            Span<char> hex = stackalloc char[32];
-            for (var i = 0; i < 16; i++) data[i + 2].TryFormat(hex.Slice(i * 2, 2), out _, "x2");
-            var uuid = new Guid($"{hex[0..8]}-{hex[8..12]}-{hex[12..16]}-{hex[16..20]}-{hex[20..32]}");
-
-            if (!IsTargetUuid(uuid)) return;
-            LastRssi = args.RawSignalStrengthInDBm;
-            _lastRssiAt = DateTimeOffset.Now;
-            RssiUpdated?.Invoke(LastRssi);
-            return;
-        }
-    }
-
-    /// <summary>与 BeaconWatcher 一致: 固定模式比对 TargetUuid; 滚动模式比对种子推导的时间片集合</summary>
-    private bool IsTargetUuid(Guid uuid)
-    {
-        if (string.IsNullOrWhiteSpace(SeedHex)) return uuid == TargetUuid;
-        var now = RollingUuid.SliceAt();
-        for (var s = now - 1; s <= now + 1; s++)
-        {
-            if (uuid == RollingUuid.Derive(SeedHex!, s)) return true;
-        }
-        return false;
-    }
-
     private void OnConnectionChanged(BluetoothLEDevice sender, object args)
     {
         var connected = sender.ConnectionStatus == BluetoothConnectionStatus.Connected;
@@ -274,14 +217,14 @@ public sealed class GattWatcher : IProximityWatcher
                 _requireSignalRecovery = false;
                 Log?.Invoke("[重新武装] 手机重新连上, 自动锁屏恢复判定。", LogLevel.Ok);
             }
-            Log?.Invoke("手机已重新连接。", LogLevel.Ok);
+            Log?.Invoke("[连接恢复] 手机已连上。", LogLevel.Ok);
             _ = VerifyTokenAsync();
         }
         else
         {
             _disconnectedSince = DateTimeOffset.Now;
             _tokenOk = false;
-            Log?.Invoke("手机连接断开 (人走了?), 开始计时判定。", LogLevel.Warn);
+            Log?.Invoke($"[连接断开] 手机离开范围, {LostTimeoutSeconds}s 后锁屏。", LogLevel.Warn);
         }
         LockStateChanged?.Invoke(!connected);
     }
@@ -291,7 +234,7 @@ public sealed class GattWatcher : IProximityWatcher
         var now = DateTimeOffset.Now;
         var connected = IsConnected;
 
-        // 给 CP 的状态: 连接在线且令牌验证通过 = 手机在附近
+        // 给 CP 的状态: 连接在线且令牌验证通过 = 手机在旁边 (锁屏界面自动解锁)
         ProximityState.Write(connected && _tokenOk);
 
         if (!_everConnected) return;   // 从未连上过 (启动预热期) 不判丢失
@@ -300,7 +243,7 @@ public sealed class GattWatcher : IProximityWatcher
             ? 0 : (now - _disconnectedSince).TotalSeconds;
         var shouldLock = !connected && lostSeconds >= LostTimeoutSeconds && !_requireSignalRecovery;
 
-        // 手动解锁后解除武装 (同广播模式): 用户输了密码 = 人在电脑前
+        // 手动解锁后解除武装: 用户输了密码 = 人在电脑前, 重连之前不再锁
         if (_locked && !connected && lostSeconds >= LostTimeoutSeconds
             && (now - _lastLockAt).TotalSeconds >= 5 && !IsSessionLocked() && !_requireSignalRecovery)
         {
@@ -321,7 +264,7 @@ public sealed class GattWatcher : IProximityWatcher
         else if (!shouldLock && _locked && connected)
         {
             _locked = false;
-            Log?.Invoke("[信号恢复] 手机已重连, 监听状态复位。", LogLevel.Ok);
+            Log?.Invoke("[状态复位] 手机已重连。", LogLevel.Ok);
         }
     }
 
@@ -353,34 +296,18 @@ public sealed class GattWatcher : IProximityWatcher
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool LockWorkStation();
 
-    /// <summary>给 UI 的快照: 连接中显示在线, 断连显示 RSSI (如果有广播)</summary>
+    /// <summary>给 UI 的快照: 连接模式只反映连接状态, 不含 RSSI</summary>
     public List<BeaconInfo> Snapshot()
     {
-        var now = DateTimeOffset.Now;
-        if (IsConnected)
-        {
-            var rssi = _lastRssiAt == DateTimeOffset.MinValue ? 0 : LastRssi;
-            var age = _lastRssiAt == DateTimeOffset.MinValue ? 0 : (now - _lastRssiAt).TotalSeconds;
-            return new List<BeaconInfo> { new(TargetUuid, rssi, age, true) };
-        }
-        if (_lastRssiAt == DateTimeOffset.MinValue || (now - _lastRssiAt).TotalSeconds > 15)
-            return new List<BeaconInfo>();
-        return new List<BeaconInfo>
-        {
-            new(TargetUuid, LastRssi, (now - _lastRssiAt).TotalSeconds, true)
-        };
+        return IsConnected
+            ? new List<BeaconInfo> { new(TargetUuid, 0, 0, true) }
+            : new List<BeaconInfo>();
     }
 
     public void Stop()
     {
         _checkTimer.Stop();
         _retryTimer.Stop();
-        if (_advWatcher != null)
-        {
-            _advWatcher.Received -= OnAdvReceived;
-            try { _advWatcher.Stop(); } catch { }
-            _advWatcher = null;
-        }
         if (_device != null)
         {
             _device.ConnectionStatusChanged -= OnConnectionChanged;
@@ -398,8 +325,6 @@ public sealed class GattWatcher : IProximityWatcher
         _locked = false;
         _requireSignalRecovery = false;
         _disconnectedSince = DateTimeOffset.MaxValue;
-        _lastRssiAt = DateTimeOffset.MinValue;
-        LastRssi = int.MinValue;
         ProximityState.Write(false);
         LockStateChanged?.Invoke(false);
     }

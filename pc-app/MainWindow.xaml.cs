@@ -581,14 +581,14 @@ public partial class MainWindow : Window
 
         if (DeviceBox.SelectedItem is PairedDevice dev)
         {
-            // 连接模式: GATT 长连接, 熄屏不误判
+            // 连接模式: GATT 长连接, 连着=解锁, 断开=锁屏 (不看 RSSI)
             _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name,
-                (int)RssiSlider.Value, lostTimeout)
+                (int)RssiSlider.Value, Math.Min(lostTimeout, 2))
             {
                 TargetUuid = uuid,
                 SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
             };
-            AppendLog($"连接模式: 已选设备 {dev.Display}。判定依据 = GATT 连接是否在线。", LogLevel.Info);
+            AppendLog($"连接模式: 已选设备 {dev.Display}。判定只看连接 — 连着=在旁边(自动解锁), 断开=锁屏。", LogLevel.Info);
         }
         else
         {
@@ -659,26 +659,8 @@ public partial class MainWindow : Window
             }
             else
             {
-                var list = g.Snapshot();
-                if (list.Count == 0)
-                {
-                    NoSignalText.Text = $"未连接 {g.DeviceName} — 手机在蓝牙范围内吗? (断开超过 {g.LostTimeoutSeconds}s 会锁屏)";
-                    NoSignalText.Visibility = Visibility.Visible;
-                }
-                else
-                {
-                    NoSignalText.Visibility = Visibility.Collapsed;
-                    var b = list[0];
-                    SignalList.Items.Add(new TextBlock
-                    {
-                        Padding = new Thickness(0, 2, 0, 2),
-                        FontFamily = new FontFamily("Consolas"),
-                        FontSize = 12,
-                        Foreground = Brushes.Orange,
-                        FontWeight = FontWeights.Bold,
-                        Text = $"[目标手机·连接断开] 最后广播 RSSI={b.AvgRssi} dBm  · {b.AgeSeconds:F0}s 前",
-                    });
-                }
+                NoSignalText.Text = $"{g.DeviceName} 未连接 — 手机在蓝牙范围内吗? (断开超过 {g.LostTimeoutSeconds}s 锁屏; 连上后锁屏界面会自动解锁)";
+                NoSignalText.Visibility = Visibility.Visible;
             }
             return;
         }
