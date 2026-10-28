@@ -7,6 +7,14 @@
 //   C:\ProgramData\ProximityLock\noautologon.flag -> 存在时只显示磁贴, 不自动登录 (调试用)
 //   C:\ProgramData\ProximityLock\cp.log     -> 运行日志 (排查"卡在哪一步"用)
 //
+// v6 修复 (找到 0xC000000D 真凶):
+//   对照微软官方 SampleCredentialProvider 的 helpers.cpp 发现致命差异:
+//   "packed" KERB_INTERACTIVE_UNLOCK_LOGON 里 UNICODE_STRING.Buffer 必须是
+//   【相对缓冲区起始的字节偏移】, 我们填的是绝对指针 -> LSA 校验直接参数错误。
+//   同时对齐官方其余细节: 两种场景都用 UNLOCK_LOGON 外壳 + LogonId 留 0 由 Winlogon 填;
+//   MessageType 按场景区分 KerbWorkstationUnlockLogon / KerbInteractiveLogon;
+//   字符串无终止符, MaximumLength == Length。
+//
 // v5 修复 (仍报参数错误 0xC000000D):
 //   LOGON 场景必须提交普通 KERB_INTERACTIVE_LOGON (与手输密码一致, LSA 自动解锁已有会话),
 //   不能塞带 LUID 的 KERB_INTERACTIVE_UNLOCK_LOGON —— 那只有 CPUS_UNLOCK_WORKSTATION 场景认。
@@ -349,63 +357,54 @@ static HRESULT GetNegotiatePackage(DWORD* package)
     return S_OK;
 }
 
-/// 打包 KERB_INTERACTIVE_(UNLOCK_)LOGON
+/// 打包 KERB_INTERACTIVE_UNLOCK_LOGON (对齐微软官方 SampleCredentialProvider 的 helpers.cpp)
+/// 关键点 (v6, 之前所有版本都栽在第一点):
+///   1. "packed" 结构里 UNICODE_STRING.Buffer 是【相对缓冲区起始的字节偏移】, 不是绝对指针!
+///      填绝对指针 LSA 直接报 STATUS_INVALID_PARAMETER ("参数错误")
+///   2. 两种场景都用 UNLOCK_LOGON 外壳, LogonId 留 0 —— Winlogon 负责填 (官方注释原文:
+///      "a LUID that is filled in for us by Winlogon as necessary")
+///   3. MessageType 按场景: CPUS_UNLOCK_WORKSTATION -> KerbWorkstationUnlockLogon,
+///      CPUS_LOGON -> KerbInteractiveLogon
+///   4. 字符串不加密时: UNICODE_STRING 无终止符, MaximumLength == Length
+///      (官方 _UnicodeStringPackedUnicodeStringCopy 就是这么拷的)
 static HRESULT PackLogonBuffer(const Account& acc, bool unlock, LUID luid,
                               std::vector<BYTE>& out, DWORD* authPackage)
 {
+    (void)luid;   // LogonId 由 Winlogon 填, 不需要我们自己查的 LUID
     DWORD package = 0;
     if (FAILED(GetNegotiatePackage(&package))) return E_FAIL;
     *authPackage = package;
 
-    size_t headerSize = unlock ? sizeof(KERB_INTERACTIVE_UNLOCK_LOGON)
-                               : sizeof(KERB_INTERACTIVE_LOGON);
     size_t userLen = acc.user.size() * sizeof(wchar_t);
     size_t domainLen = acc.domain.size() * sizeof(wchar_t);
     size_t passLen = acc.password.size() * sizeof(wchar_t);
 
-    // LSA 惯例: UNICODE_STRING.MaximumLength 必须含 null 终止符空间 (>= Length+2),
-    // 否则 RtlValidateUnicodeString 报 STATUS_INVALID_PARAMETER ("参数错误")
-    // 每个字符串缓冲区补终止符 + 对齐到 4 字节
-    auto align4 = [](size_t n) { return (n + 3) & ~static_cast<size_t>(3); };
-    size_t userCap = align4(userLen + sizeof(wchar_t));
-    size_t domainCap = align4(domainLen + sizeof(wchar_t));
-    size_t passCap = align4(passLen + sizeof(wchar_t));
+    out.assign(sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) + userLen + domainLen + passLen, 0);
 
-    out.assign(headerSize + userCap + domainCap + passCap, 0);
+    auto* k = reinterpret_cast<KERB_INTERACTIVE_UNLOCK_LOGON*>(out.data());
+    k->LogonId.LowPart = 0;
+    k->LogonId.HighPart = 0;
+    k->Logon.MessageType = unlock ? KerbWorkstationUnlockLogon : KerbInteractiveLogon;
 
-    UNICODE_STRING uUser{}, uDomain{}, uPass{};
-    uUser.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize);
-    uUser.Length = static_cast<USHORT>(userLen);
-    uUser.MaximumLength = static_cast<USHORT>(userCap);
-    if (userLen) memcpy(uUser.Buffer, acc.user.data(), userLen);
+    size_t off = sizeof(KERB_INTERACTIVE_UNLOCK_LOGON);   // 字符串紧跟结构体, Buffer 存偏移
 
-    uDomain.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userCap);
-    uDomain.Length = static_cast<USHORT>(domainLen);
-    uDomain.MaximumLength = static_cast<USHORT>(domainCap);
-    if (domainLen) memcpy(uDomain.Buffer, acc.domain.data(), domainLen);
+    k->Logon.LogonDomainName.Buffer = reinterpret_cast<PWSTR>(off);
+    k->Logon.LogonDomainName.Length = static_cast<USHORT>(domainLen);
+    k->Logon.LogonDomainName.MaximumLength = static_cast<USHORT>(domainLen);
+    if (domainLen) memcpy(out.data() + off, acc.domain.data(), domainLen);
+    off += domainLen;
 
-    uPass.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userCap + domainCap);
-    uPass.Length = static_cast<USHORT>(passLen);
-    uPass.MaximumLength = static_cast<USHORT>(passCap);
-    if (passLen) memcpy(uPass.Buffer, acc.password.data(), passLen);
+    k->Logon.UserName.Buffer = reinterpret_cast<PWSTR>(off);
+    k->Logon.UserName.Length = static_cast<USHORT>(userLen);
+    k->Logon.UserName.MaximumLength = static_cast<USHORT>(userLen);
+    if (userLen) memcpy(out.data() + off, acc.user.data(), userLen);
+    off += userLen;
 
-    if (unlock)
-    {
-        auto* k = reinterpret_cast<KERB_INTERACTIVE_UNLOCK_LOGON*>(out.data());
-        k->LogonId = luid;
-        k->Logon.MessageType = KerbInteractiveLogon;
-        k->Logon.UserName = uUser;
-        k->Logon.LogonDomainName = uDomain;
-        k->Logon.Password = uPass;
-    }
-    else
-    {
-        auto* k = reinterpret_cast<KERB_INTERACTIVE_LOGON*>(out.data());
-        k->MessageType = KerbInteractiveLogon;
-        k->UserName = uUser;
-        k->LogonDomainName = uDomain;
-        k->Password = uPass;
-    }
+    k->Logon.Password.Buffer = reinterpret_cast<PWSTR>(off);
+    k->Logon.Password.Length = static_cast<USHORT>(passLen);
+    k->Logon.Password.MaximumLength = static_cast<USHORT>(passLen);
+    if (passLen) memcpy(out.data() + off, acc.password.data(), passLen);
+
     return S_OK;
 }
 

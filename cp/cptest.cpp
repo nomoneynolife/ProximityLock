@@ -142,20 +142,32 @@ int wmain(int argc, wchar_t** argv)
 
     if (resp == CPGSR_RETURN_CREDENTIAL_FINISHED && ser.rgbSerialization && ser.cbSerialization > 0)
     {
-        // 按 KERB_INTERACTIVE_UNLOCK_LOGON 解析, 确认三个 UNICODE_STRING 都落在包内
+        // 官方 "packed" 格式: UNICODE_STRING.Buffer 是相对包起始的字节偏移 (不是绝对指针)
         auto* k = reinterpret_cast<KERB_INTERACTIVE_UNLOCK_LOGON*>(ser.rgbSerialization);
-        auto inside = [&](const UNICODE_STRING& s) {
-            auto* begin = reinterpret_cast<BYTE*>(ser.rgbSerialization);
-            auto* end = begin + ser.cbSerialization;
+        auto base = reinterpret_cast<BYTE*>(ser.rgbSerialization);
+        auto inPack = [&](const UNICODE_STRING& s) {
             auto* p = reinterpret_cast<BYTE*>(s.Buffer);
-            return p >= begin && p + s.Length <= end;
+            return p >= base && p + s.Length <= base + ser.cbSerialization;
         };
-        printf("\n[5] 包内结构检查 (KERB_INTERACTIVE_UNLOCK_LOGON):\n");
-        printf("      LogonId      : %lu:%ld\n", k->LogonId.HighPart, k->LogonId.LowPart);
-        printf("      MessageType  : %d (期望 %d=KerbInteractiveLogon)\n", k->Logon.MessageType, KerbInteractiveLogon);
-        printf("      UserName     : len=%u 在包内=%s\n", k->Logon.UserName.Length, inside(k->Logon.UserName) ? "是" : "否");
-        printf("      DomainName   : len=%u 在包内=%s\n", k->Logon.LogonDomainName.Length, inside(k->Logon.LogonDomainName) ? "是" : "否");
-        printf("      Password     : len=%u 在包内=%s\n", k->Logon.Password.Length, inside(k->Logon.Password) ? "是" : "否");
+        auto readStr = [&](const UNICODE_STRING& s) {
+            return std::wstring(reinterpret_cast<wchar_t*>(base + reinterpret_cast<size_t>(s.Buffer)),
+                                s.Length / sizeof(wchar_t));
+        };
+        int expectType = unlock ? KerbWorkstationUnlockLogon : KerbInteractiveLogon;
+        printf("\n[5] 包内结构检查 (官方 packed 格式, Buffer=字节偏移):\n");
+        printf("      LogonId      : %lu:%ld (期望 0:0, Winlogon 负责填)\n", k->LogonId.HighPart, k->LogonId.LowPart);
+        printf("      MessageType  : %d (期望 %d)\n", k->Logon.MessageType, expectType);
+        printf("      DomainName   : off=%u len=%u 在包内=%s 内容=%ls\n",
+               (unsigned)reinterpret_cast<size_t>(k->Logon.LogonDomainName.Buffer),
+               k->Logon.LogonDomainName.Length, inPack(k->Logon.LogonDomainName) ? "是" : "否",
+               readStr(k->Logon.LogonDomainName).c_str());
+        printf("      UserName     : off=%u len=%u 在包内=%s 内容=%ls\n",
+               (unsigned)reinterpret_cast<size_t>(k->Logon.UserName.Buffer),
+               k->Logon.UserName.Length, inPack(k->Logon.UserName) ? "是" : "否",
+               readStr(k->Logon.UserName).c_str());
+        printf("      Password     : off=%u len=%u 在包内=%s (内容不打印)\n",
+               (unsigned)reinterpret_cast<size_t>(k->Logon.Password.Buffer),
+               k->Logon.Password.Length, inPack(k->Logon.Password) ? "是" : "否");
     }
 
     if (ser.rgbSerialization) CoTaskMemFree(ser.rgbSerialization);
