@@ -7,6 +7,12 @@
 //   C:\ProgramData\ProximityLock\noautologon.flag -> 存在时只显示磁贴, 不自动登录 (调试用)
 //   C:\ProgramData\ProximityLock\cp.log     -> 运行日志 (排查"卡在哪一步"用)
 //
+// v4 修复 (自动提交后报"参数错误" 0xC000000D):
+//   1. Domain "." 不是合法的 Kerb LogonDomainName —— LogonUser API 才接受 ".\user",
+//      Kerb 包必须用计算机 NetBIOS 名。LoadCredential 里自动归一化 (./空 -> 计算机名)
+//   2. UNICODE_STRING.MaximumLength 按 LSA 惯例必须含 null 终止符空间 (>= Length+2),
+//      原来等于 Length, RtlValidateUnicodeString 直接报参数错误。缓冲区补终止符+4字节对齐
+//
 // v3 修复 (锁屏后不自动解锁):
 //   Win10/11 锁屏 (Win+L) 后 LogonUI 用 CPUS_LOGON (1) 场景加载 CP, 不再是老系统的
 //   CPUS_UNLOCK_WORKSTATION (2)。v2 的 GetCredentialCount 只认场景 2, 直接返回 0 个凭据,
@@ -219,6 +225,21 @@ static Account LoadCredential()
     acc.user = toW(utf8.substr(0, p1));
     acc.domain = toW(utf8.substr(p1 + 1, p2 - p1 - 1));
     acc.password = toW(utf8.substr(p2 + 1));
+
+    // 域名归一化: "." 或空 不是合法的 Kerb LogonDomainName (LSA 报 STATUS_INVALID_PARAMETER),
+    // 本地账户用计算机 NetBIOS 名
+    if (acc.domain == L"." || acc.domain.empty())
+    {
+        wchar_t comp[MAX_COMPUTERNAME_LENGTH + 1]{};
+        DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
+        if (GetComputerNameW(comp, &len))
+        {
+            Log(L"LoadCredential: domain '%s' normalized to computer name '%s'",
+                acc.domain.c_str(), comp);
+            acc.domain = comp;
+        }
+    }
+
     acc.valid = !acc.user.empty() && !acc.password.empty();
     SecureZeroMemory(&utf8[0], utf8.size());
     return acc;
@@ -337,22 +358,30 @@ static HRESULT PackLogonBuffer(const Account& acc, bool unlock, LUID luid,
     size_t domainLen = acc.domain.size() * sizeof(wchar_t);
     size_t passLen = acc.password.size() * sizeof(wchar_t);
 
-    out.assign(headerSize + userLen + domainLen + passLen, 0);
+    // LSA 惯例: UNICODE_STRING.MaximumLength 必须含 null 终止符空间 (>= Length+2),
+    // 否则 RtlValidateUnicodeString 报 STATUS_INVALID_PARAMETER ("参数错误")
+    // 每个字符串缓冲区补终止符 + 对齐到 4 字节
+    auto align4 = [](size_t n) { return (n + 3) & ~static_cast<size_t>(3); };
+    size_t userCap = align4(userLen + sizeof(wchar_t));
+    size_t domainCap = align4(domainLen + sizeof(wchar_t));
+    size_t passCap = align4(passLen + sizeof(wchar_t));
+
+    out.assign(headerSize + userCap + domainCap + passCap, 0);
 
     UNICODE_STRING uUser{}, uDomain{}, uPass{};
     uUser.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize);
     uUser.Length = static_cast<USHORT>(userLen);
-    uUser.MaximumLength = static_cast<USHORT>(userLen);
+    uUser.MaximumLength = static_cast<USHORT>(userCap);
     if (userLen) memcpy(uUser.Buffer, acc.user.data(), userLen);
 
-    uDomain.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userLen);
+    uDomain.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userCap);
     uDomain.Length = static_cast<USHORT>(domainLen);
-    uDomain.MaximumLength = static_cast<USHORT>(domainLen);
+    uDomain.MaximumLength = static_cast<USHORT>(domainCap);
     if (domainLen) memcpy(uDomain.Buffer, acc.domain.data(), domainLen);
 
-    uPass.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userLen + domainLen);
+    uPass.Buffer = reinterpret_cast<PWSTR>(out.data() + headerSize + userCap + domainCap);
     uPass.Length = static_cast<USHORT>(passLen);
-    uPass.MaximumLength = static_cast<USHORT>(passLen);
+    uPass.MaximumLength = static_cast<USHORT>(passCap);
     if (passLen) memcpy(uPass.Buffer, acc.password.data(), passLen);
 
     if (unlock)
