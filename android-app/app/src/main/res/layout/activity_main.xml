@@ -97,7 +97,7 @@
                 android:layout_marginTop="12dp"
                 android:background="@drawable/bg_btn_primary"
                 android:stateListAnimator="@null"
-                android:text="开始广播"
+                android:text="自动解锁"
                 android:textAllCaps="false"
                 android:textColor="#FFFFFF"
                 android:textSize="16sp"
@@ -150,7 +150,7 @@
                         style="@style/RowTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="打开 App 自动开始广播" />
+                        android:text="打开 App 自动开启" />
 
                     <TextView
                         style="@style/RowSub"

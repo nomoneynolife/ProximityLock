@@ -156,7 +156,7 @@ class BeaconService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "接近解锁服务", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL_ID, "自动解锁服务", NotificationManager.IMPORTANCE_LOW)
             )
         }
 
@@ -172,7 +172,7 @@ class BeaconService : Service() {
         val notification: Notification = if (Build.VERSION.SDK_INT >= 33) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Proximity Lock")
-                .setContentText("蓝牙连接模式运行中, 点此打开 App")
+                .setContentText("自动解锁服务运行中, 点此打开 App")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
                 .setContentIntent(openApp)
@@ -181,7 +181,7 @@ class BeaconService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Proximity Lock")
-                .setContentText("蓝牙连接模式运行中, 点此打开 App")
+                .setContentText("自动解锁服务运行中, 点此打开 App")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
                 .setContentIntent(openApp)

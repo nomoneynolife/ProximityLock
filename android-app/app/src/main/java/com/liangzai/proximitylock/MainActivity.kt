@@ -204,7 +204,7 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQ_PERMS && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
             startBeacon()
         } else {
-            showStatus("权限被拒了，广播开不了", false)
+            showStatus("权限被拒了，自动解锁开不了", false)
         }
     }
 
@@ -215,14 +215,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUi(running: Boolean) {
         if (running) {
-            toggleBtn.text = "停止广播"
+            toggleBtn.text = "停止解锁"
             toggleBtn.setBackgroundResource(R.drawable.bg_btn_stop)
-            statusText.text = "运行中 · 等待 PC 连接"
+            statusText.text = "自动解锁已开启 · 等待 PC 连接"
             statusDot.setBackgroundResource(R.drawable.dot_ok)
         } else {
-            toggleBtn.text = "开始广播"
+            toggleBtn.text = "自动解锁"
             toggleBtn.setBackgroundResource(R.drawable.bg_btn_primary)
-            statusText.text = "未运行 · 点击下方按钮开启"
+            statusText.text = "自动解锁未开启"
             statusDot.setBackgroundResource(R.drawable.dot_idle)
         }
     }
