@@ -53,7 +53,7 @@ class BeaconService : Service() {
         startAdvertising()
         isRunning = true
         PrefStore.setWantRunning(this, true)
-        RestartReceiver.schedule(this)   // 看门狗: 万一被 ROM 干掉, 60 秒内自动拉回
+        RestartReceiver.schedule(this, 20_000L)   // 看门狗: 每 20 秒确认一次存活
         return START_STICKY
     }
 
@@ -68,7 +68,8 @@ class BeaconService : Service() {
                 startAdvertising()
                 isRunning = true
             }
-            RestartReceiver.schedule(this, 5_000L)
+            // 关键: 立刻排一个 1 秒后的看门狗 —— ROM 真把进程杀了, 系统闹钟也会马上把服务拉回
+            RestartReceiver.schedule(this, 1_000L)
             // 直接补一次 startService, 有的 ROM 允许同进程自启
             try {
                 startService(Intent(this, BeaconService::class.java))
@@ -85,6 +86,9 @@ class BeaconService : Service() {
         if (!PrefStore.isWantRunning(this)) {
             // 用户主动停止/完全退出: 撤掉看门狗, 别把自己救回来
             RestartReceiver.cancel(this)
+        } else {
+            // 被动被系统销毁: 尽快排一次看门狗, 1.5 秒后就尝试恢复
+            RestartReceiver.schedule(this, 1_500L)
         }
         // 停止时一并撤掉常驻通知 (完全退出时通知栏不留残影)
         if (Build.VERSION.SDK_INT >= 24) {
@@ -152,6 +156,17 @@ class BeaconService : Service() {
         }
     }
 
+    /**
+     * Android 12+: 从后台拉起前台服务时, 系统默认把通知延后 10 秒显示,
+     * 设置 FOREGROUND_SERVICE_IMMEDIATE 可以让状态栏立刻出现, 用户能马上看到恢复。
+     */
+    private fun withImmediateBehavior(n: Notification): Notification {
+        if (Build.VERSION.SDK_INT < 31) return n
+        val b = Notification.Builder.recoverBuilder(this, n)
+        b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        return b.build()
+    }
+
     private fun startAsForeground() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -169,7 +184,7 @@ class BeaconService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification: Notification = if (Build.VERSION.SDK_INT >= 33) {
+        var notification: Notification = if (Build.VERSION.SDK_INT >= 33) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Proximity Lock")
                 .setContentText("自动解锁服务运行中, 点此打开 App")
@@ -186,6 +201,10 @@ class BeaconService : Service() {
                 .setOngoing(true)
                 .setContentIntent(openApp)
                 .build()
+        }
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            notification = withImmediateBehavior(notification)
         }
 
         if (Build.VERSION.SDK_INT >= 34) {

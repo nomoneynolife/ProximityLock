@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toggleBtn: Button
     private lateinit var autoStartSwitch: SwitchCompat
     private lateinit var tvBatteryState: TextView
+    private lateinit var tvAlarmState: TextView
     private val adapter: BluetoothAdapter?
         get() = (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
@@ -64,6 +65,7 @@ class MainActivity : AppCompatActivity() {
         toggleBtn = findViewById(R.id.toggleBtn)
         autoStartSwitch = findViewById(R.id.autoStartSwitch)
         tvBatteryState = findViewById(R.id.tvBatteryState)
+        tvAlarmState = findViewById(R.id.tvAlarmState)
 
         autoStartSwitch.isChecked = PrefStore.isAutoStart(this)
         autoStartSwitch.setOnCheckedChangeListener { _, checked ->
@@ -92,6 +94,23 @@ class MainActivity : AppCompatActivity() {
                 ))
             } else {
                 Toast.makeText(this, "已经在电池白名单里了", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 精密闹钟: 决定被 ROM 清后台后多久能恢复 (Android 12+ 需手动授权)
+        findViewById<View>(R.id.rowAlarm).setOnClickListener {
+            if (Build.VERSION.SDK_INT >= 31 && !alarmManager().canScheduleExactAlarms()) {
+                try {
+                    startActivity(Intent(
+                        android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                        android.net.Uri.parse("package:$packageName")
+                    ))
+                } catch (_: Exception) {
+                    Toast.makeText(this, "请到 设置 → 应用 → 特殊权限 → 闹钟和提醒 中开启",
+                        Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(this, "已授权, 后台恢复速度正常", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -134,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateUi(BeaconService.isRunning)
         refreshBatteryState(getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+        refreshAlarmState()
 
         // 自动开始: 开关开着且服务没在跑 → 自动进入广播状态
         if (autoStartSwitch.isChecked && !BeaconService.isRunning) {
@@ -151,6 +171,20 @@ class MainActivity : AppCompatActivity() {
         tvBatteryState.setTextColor(
             ContextCompat.getColor(this, if (granted) R.color.ok else R.color.ink_soft)
         )
+    }
+
+    private fun alarmManager() =
+        getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+
+    private fun refreshAlarmState() {
+        val ok = Build.VERSION.SDK_INT < 31 || alarmManager().canScheduleExactAlarms()
+        tvAlarmState.text = when {
+            ok -> "已授权 · 被清后台后秒级恢复"
+            Build.VERSION.SDK_INT >= 31 -> "未授权 · 恢复会变慢, 点击授予"
+            else -> "系统版本无需授权"
+        }
+        tvAlarmState.setTextColor(ContextCompat.getColor(
+            this, if (ok) R.color.ok else R.color.warn))
     }
 
     private fun hasRequiredPermissions(): Boolean {
