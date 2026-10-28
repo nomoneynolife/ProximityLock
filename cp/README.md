@@ -15,7 +15,7 @@ ProximityCredentialProvider.dll (LogonUI 加载, SYSTEM)
 Windows 自动提交 creds.bin 里的凭据 → 进桌面
 ```
 
-只在 **CPUS_UNLOCK_WORKSTATION（锁屏解锁）** 场景工作，开机登录场景完全不介入。
+**同时接 CPUS_LOGON（1）和 CPUS_UNLOCK_WORKSTATION（2）** 两个场景：Win10/11 锁屏（Win+L）后 LogonUI 实测用 **CPUS_LOGON** 加载 CP（老系统才是 UNLOCK 场景）。用"目标用户是否已有交互会话"区分真解锁与冷启动开机——LOGON 场景查不到交互会话 LUID = 冷启动开机，不介入，所以**开机登录不会被自动登录**。
 
 ## 文件
 
@@ -120,7 +120,7 @@ Remove-Item "C:\ProgramData\ProximityLock\noautologon.flag"
 ```
 === DLL_PROCESS_ATTACH pid=1234 ===
 --- CProvider created ---
-SetUsageScenario: 2                     <- 2 = CPUS_UNLOCK_WORKSTATION
+SetUsageScenario: 1                     <- Win11 锁屏解锁走 LOGON 场景 (1), 正常
 EnsureCache: user=Administrator domain=. luidOk=1 luid=0:660752
 GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
 SetSelected -> FALSE                    <- 必须是 FALSE
@@ -131,7 +131,8 @@ ReportResult: status=0x00000000 sub=0x00000000   <- 0 = 登录成功
 | 日志现象 | 含义 |
 |---|---|
 | 没有 `DLL_PROCESS_ATTACH` | CP 没被加载：注册表没写对，或不是解锁场景 |
-| 只有 `SetUsageScenario: 1` | 1 = CPUS_LOGON（开机登录），我们不介入，正常 |
+| `SetUsageScenario: 1` 后没有 `GetCredentialCount` | v2 及更早版本才有的问题：只认场景 2，Win11 锁屏走场景 1 被跳过。**换 v3 DLL** |
+| `LOGON scenario but no existing session (cold boot) -> 0` | 冷启动开机保护生效，不介入，正常 |
 | `luidOk=0` | 找不到交互会话 LUID → 不给凭据。核对 creds 里的用户名与登录名是否一致 |
 | `near=0 -> 0 credentials` | state.ini 不新鲜（simulate 没在跑，或超过 6 秒） |
 | `autologon=0 (blocked=1)` | 之前失败过，已熔断，本次不自动登录（重新登录一次 LogonUI 会复位） |
@@ -154,6 +155,19 @@ ReportResult: status=0x00000000 sub=0x00000000   <- 0 = 登录成功
 .\simulate-phone.cmd -KeepNear   # 持续模拟靠近 (推荐)
 .\simulate-phone.cmd -Away       # 模拟离开
 ```
+
+## v3 修了什么（针对"锁屏了但没解锁"）
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | `GetCredentialCount` 只认 `CPUS_UNLOCK_WORKSTATION`；**Win10/11 锁屏后 LogonUI 实测用 `CPUS_LOGON`（场景 1）加载 CP**，所以锁屏后 CP 一直返回 0 个凭据，watcher 触发了 `CredentialsChanged` 也没用 | 两个场景都接 |
+| 2 | 无法区分"LOGON 场景的解锁"和"冷启动开机登录" | LOGON 场景 + `luidOk=0`（目标用户还没有交互会话）= 冷启动，不介入；有会话 = 真解锁，正常给凭据 |
+| 3 | 序列化类型按 UI 场景判定，Win11 的"LOGON 场景解锁"会拿不到 UNLOCK_LOGON | 改为按 LUID 判定：拿到会话 LUID 就用 `KERB_INTERACTIVE_UNLOCK_LOGON`，与场景无关 |
+
+宿主机实测（cptest，免注册）：
+- UNLOCK 场景：1 凭据 + autologon=1 + GetSerialization OK
+- LOGON 场景 + 已有会话（= Win11 锁屏）：1 凭据 + autologon=1 ✓
+- LOGON 场景 + 无会话（= 冷启动）：0 凭据，日志打印 `cold boot -> 0` ✓
 
 ## v2 修了什么（针对"登录界面卡死"）
 

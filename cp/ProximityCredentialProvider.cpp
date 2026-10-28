@@ -7,6 +7,15 @@
 //   C:\ProgramData\ProximityLock\noautologon.flag -> 存在时只显示磁贴, 不自动登录 (调试用)
 //   C:\ProgramData\ProximityLock\cp.log     -> 运行日志 (排查"卡在哪一步"用)
 //
+// v3 修复 (锁屏后不自动解锁):
+//   Win10/11 锁屏 (Win+L) 后 LogonUI 用 CPUS_LOGON (1) 场景加载 CP, 不再是老系统的
+//   CPUS_UNLOCK_WORKSTATION (2)。v2 的 GetCredentialCount 只认场景 2, 直接返回 0 个凭据,
+//   所以手机在旁边也永远不自动登录。
+//   v3: 两个场景都接。用"目标用户是否已有交互会话"区分真解锁与冷启动开机:
+//   LOGON 场景 + 查不到交互会话 LUID => 冷启动, 不介入 (开机安全);
+//   LOGON 场景 + 有会话 LUID => 是披着 LOGON 外衣的解锁, 正常提供凭据。
+//   序列化也改为按 LUID 判定: 有 LUID 就用 KERB_INTERACTIVE_UNLOCK_LOGON, 与场景无关。
+//
 // v2 修复 (登录界面卡死 / 无限重试):
 //   1. SetSelected 不再返回 pbAutoLogon=TRUE
 //      —— 原来 GetCredentialCount 和 SetSelected 都返回 TRUE, 等于每次选中都自动提交,
@@ -499,7 +508,9 @@ public:
             return S_OK;
         }
 
-        bool unlock = (_scenario == CPUS_UNLOCK_WORKSTATION);
+        // 是否用 UNLOCK_LOGON 序列化: 只要拿到目标会话的 LUID 就是解锁已有会话,
+        // 与 UI 场景无关 —— Win11 锁屏解锁虽然走 CPUS_LOGON 场景, 解锁仍是已有会话
+        bool unlock = (_luid.LowPart != 0 || _luid.HighPart != 0);
         std::vector<BYTE> buf;
         DWORD package = 0;
         if (FAILED(PackLogonBuffer(_acc, unlock, _luid, buf, &package)))
@@ -655,8 +666,23 @@ public:
         *pdwDefault = CREDENTIAL_PROVIDER_NO_DEFAULT;
         *pbAutoLogon = FALSE;
 
-        // 只在锁屏解锁场景介入; 开机登录不碰, 避免进不去系统
-        if (_scenario != CPUS_UNLOCK_WORKSTATION) return S_OK;
+        // 两种解锁场景都接:
+        //   CPUS_UNLOCK_WORKSTATION: 传统锁屏解锁
+        //   CPUS_LOGON: Win10/11 的锁屏解锁也用这个场景加载 LogonUI (实测 Win+L 后是 1)
+        // 区分"真解锁"和"冷启动开机登录": 前者目标用户已存在交互会话 (EnsureCache 能查到 LUID),
+        // 后者还没有任何会话。所以 LOGON 场景下 luidOk=0 一律不介入, 开机不会被自动登录。
+        if (_scenario != CPUS_UNLOCK_WORKSTATION && _scenario != CPUS_LOGON)
+        {
+            Log(L"GetCredentialCount: scenario=%lu not handled -> 0", static_cast<ULONG>(_scenario));
+            return S_OK;
+        }
+
+        EnsureCache();
+        if (_scenario == CPUS_LOGON && !_luidOk)
+        {
+            Log(L"GetCredentialCount: LOGON scenario but no existing session (cold boot) -> 0");
+            return S_OK;
+        }
 
         if (!IsProximityNear())
         {
@@ -664,7 +690,6 @@ public:
             return S_OK;
         }
 
-        EnsureCache();
         if (!_cacheValid)
         {
             Log(L"GetCredentialCount: near=1 but cache invalid (creds or LUID unavailable)");

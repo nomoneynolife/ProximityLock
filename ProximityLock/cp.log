@@ -1,0 +1,30 @@
+[09:00:59.733][tid  2588] === DLL_PROCESS_ATTACH pid=8188 ===
+[09:00:59.733][tid  2588] --- CProvider created (pid 8188) ---
+[09:00:59.733][tid  2588] SetUsageScenario: 2
+[09:00:59.749][tid  2588] GetInteractiveLuid: user=administrator mySession=1 consoleSession=1
+[09:00:59.749][tid  2588] GetInteractiveLuid: candidate session=1 luid=0:120276
+[09:00:59.749][tid  2588] EnsureCache: user=administrator domain=. luidOk=1 luid=0:120276
+[09:00:59.749][tid  2588] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
+[09:00:59.749][tid  2588] SetSelected -> FALSE
+[09:00:59.749][tid  2588] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
+[09:00:59.749][tid  2588] --- CProvider destroyed ---
+[09:02:17.834][tid  2648] === DLL_PROCESS_ATTACH pid=5740 ===
+[09:02:17.834][tid  2648] --- CProvider created (pid 5740) ---
+[09:02:17.928][tid  2648] SetUsageScenario: 1
+[09:02:17.944][tid  2648] Advise: context=0x6
+[09:02:17.944][tid  2648] watcher started: 0000000000000AA8
+[09:02:18.756][tid  8132] watcher: near became 1 -> CredentialsChanged
+[09:02:18.756][tid  8132] watcher: CredentialsChanged returned
+[09:02:39.052][tid  2648] UnAdvise
+[09:02:39.067][tid  2648] watcher stopped
+[09:02:39.067][tid  2648] --- CProvider destroyed ---
+[09:03:14.048][tid  4196] === DLL_PROCESS_ATTACH pid=3436 ===
+[09:03:14.048][tid  4196] --- CProvider created (pid 3436) ---
+[09:03:14.126][tid  4196] SetUsageScenario: 1
+[09:03:14.126][tid  4196] Advise: context=0x6
+[09:03:14.126][tid  4196] watcher started: 0000000000000A7C
+[09:03:14.954][tid  8908] watcher: near became 1 -> CredentialsChanged
+[09:03:14.954][tid  8908] watcher: CredentialsChanged returned
+[09:03:22.750][tid  4196] UnAdvise
+[09:03:23.078][tid  4196] watcher stopped
+[09:03:23.078][tid  4196] --- CProvider destroyed ---
