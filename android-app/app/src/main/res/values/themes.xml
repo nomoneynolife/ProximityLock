@@ -1,8 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ProximityLock" parent="Theme.AppCompat.Light.DarkActionBar">
-        <item name="colorPrimary">#1565C0</item>
-        <item name="colorPrimaryDark">#0D47A1</item>
-        <item name="colorAccent">#42A5F5</item>
+    <style name="Theme.ProximityLock" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorPrimaryDark">@color/brand_deep</item>
+        <item name="colorAccent">@color/brand</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:statusBarColor">@color/brand_deep</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/page_bg</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <!-- 卡片里的列表行文字 -->
+    <style name="RowTitle">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+
+    <style name="RowSub">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/ink_soft</item>
+        <item name="android:layout_marginTop">2dp</item>
     </style>
 </resources>

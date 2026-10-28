@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 品牌色 -->
+    <color name="brand_deep">#22308F</color>
+    <color name="brand">#3D5BFF</color>
+    <color name="brand_light">#5B7CFF</color>
+
+    <!-- 背景 / 文字 -->
+    <color name="page_bg">#F4F6FB</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="ink">#12182B</color>
+    <color name="ink_soft">#6B7388</color>
+    <color name="line">#EBEEF6</color>
+
+    <!-- 状态 -->
+    <color name="ok">#10B981</color>
+    <color name="warn">#F59E0B</color>
+    <color name="danger">#E5484D</color>
+    <color name="idle">#B9C0D4</color>
+</resources>
