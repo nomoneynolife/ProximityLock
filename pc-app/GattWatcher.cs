@@ -13,14 +13,24 @@ namespace ProximityLock;
 /// </summary>
 public sealed class GattWatcher : IProximityWatcher
 {
+    // 与安卓端 BeaconService 的最小 GATT 服务一致 (心跳保活用)
+    private static readonly Guid ServiceUuid =
+        new("9A660001-C77B-4A9D-B5E3-1D6B7A9E2C11");
+    private static readonly Guid CharUuid =
+        new("9A660002-C77B-4A9D-B5E3-1D6B7A9E2C11");
+
     private readonly ulong _address;
     private readonly string? _deviceId;   // DeviceInformation.Id: Windows 知道地址类型, 优先用它
     private readonly string _deviceName;
 
     private BluetoothLEDevice? _device;
     private GattSession? _session;
+    private GattCharacteristic? _char;            // 心跳保活读的特征值
     private readonly System.Timers.Timer _checkTimer;
-    private readonly System.Timers.Timer _retryTimer;
+    private readonly System.Timers.Timer _keepAliveTimer;   // 主动保活: 心跳 + 断开主动重连
+    private int _keepAliveBusy;                   // 防止保活循环重入
+    private int _heartbeatFailures;
+    private DateTimeOffset _lastConnectFailLog = DateTimeOffset.MinValue;
 
     public int LostTimeoutSeconds { get; set; } = 2;   // 断开后的防抖时间 (防瞬时抖动误锁)
 
@@ -33,7 +43,6 @@ public sealed class GattWatcher : IProximityWatcher
     // 判定状态
     private bool _everConnected;
     private DateTimeOffset _disconnectedSince = DateTimeOffset.MaxValue;
-
     // 锁屏判定
     private bool _locked;
     private DateTimeOffset _lastLockAt = DateTimeOffset.MinValue;
@@ -52,14 +61,22 @@ public sealed class GattWatcher : IProximityWatcher
         _checkTimer = new System.Timers.Timer(500);
         _checkTimer.Elapsed += (_, _) => Evaluate();
 
-        _retryTimer = new System.Timers.Timer(10000);
-        _retryTimer.Elapsed += (_, _) => { if (_device == null) _ = ConnectAsync(); };
+        // 主动保活: 每 5 秒一轮 — 连着 = 读特征值心跳 (保持链路活跃),
+        // 断开 = 立刻主动重连 (不干等系统慢慢重试)
+        _keepAliveTimer = new System.Timers.Timer(5000);
+        _keepAliveTimer.Elapsed += (_, _) =>
+        {
+            if (Interlocked.Exchange(ref _keepAliveBusy, 1) == 0)
+            {
+                _ = KeepAliveTick();
+            }
+        };
     }
 
     public void Start()
     {
         _checkTimer.Start();
-        _retryTimer.Start();
+        _keepAliveTimer.Start();
         Log?.Invoke($"连接模式: 正在连接 {_deviceName}… (连着=解锁, 断开={LostTimeoutSeconds}s后锁屏)", LogLevel.Info);
         _ = ConnectAsync();
     }
@@ -87,8 +104,13 @@ public sealed class GattWatcher : IProximityWatcher
             }
             if (device == null)
             {
-                Log?.Invoke("暂未连上 (手机不在范围或没在广播?), 10 秒后自动重试。",
-                    LogLevel.Info);
+                // 手机当前不在广播 (不在范围/蓝牙关) —— 保活循环会继续重试
+                if ((DateTimeOffset.Now - _lastConnectFailLog).TotalSeconds >= 30)
+                {
+                    _lastConnectFailLog = DateTimeOffset.Now;
+                    Log?.Invoke("暂未连上 (手机不在范围或没在广播?), 持续自动重试中…",
+                        LogLevel.Info);
+                }
                 return;
             }
             _device = device;
@@ -97,16 +119,97 @@ public sealed class GattWatcher : IProximityWatcher
             _session = await GattSession.FromDeviceIdAsync(device.BluetoothDeviceId);
             if (_session != null)
             {
-                _session.MaintainConnection = true;   // 关键: 系统保持长连接, 断了自动重连
+                _session.MaintainConnection = true;   // 系统层面保持长连接
             }
 
             _everConnected = true;
             Log?.Invoke($"[已连接] {_deviceName}。手机在旁边 → 锁屏界面会自动解锁。", LogLevel.Ok);
+            _ = DiscoverCharAsync();
         }
         catch (Exception ex)
         {
             Log?.Invoke($"连接失败: {ex.Message}", LogLevel.Error);
         }
+    }
+
+    /// <summary>连接成功后找到心跳用的特征值 (安卓端的最小 GATT 服务)</summary>
+    private async Task DiscoverCharAsync()
+    {
+        try
+        {
+            var services = await _device!.GetGattServicesAsync(BluetoothCacheMode.Uncached);
+            var svc = services.Services.FirstOrDefault(s => s.Uuid == ServiceUuid);
+            if (svc == null) return;
+            var chars = await svc.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+            _char = chars.Characteristics.FirstOrDefault(c => c.Uuid == CharUuid);
+        }
+        catch
+        {
+            _char = null;   // 发现失败不影响连接判定, 只是少了心跳
+        }
+    }
+
+    /// <summary>保活循环 (每 5 秒): 连着 = 心跳; 断开 = 主动重连</summary>
+    private async Task KeepAliveTick()
+    {
+        try
+        {
+            if (_device == null)
+            {
+                await ConnectAsync();
+                return;
+            }
+
+            if (IsConnected)
+            {
+                if (_char == null)
+                {
+                    _ = DiscoverCharAsync();
+                    return;
+                }
+                // 心跳: 读一次特征值, 保持链路活跃 + 确认连接真实可用
+                try
+                {
+                    await _char.ReadValueAsync(BluetoothCacheMode.Cached);
+                    _heartbeatFailures = 0;
+                }
+                catch
+                {
+                    _heartbeatFailures++;
+                    if (_heartbeatFailures >= 2)
+                    {
+                        Log?.Invoke("[保活] 连接无响应 (心跳连续失败), 主动重建连接…", LogLevel.Warn);
+                        CleanupDevice();
+                        _ = ConnectAsync();
+                    }
+                }
+                return;
+            }
+
+            // 已断开: 主动重新发起连接 (dispose 旧对象后重建, 不等系统重试)
+            Log?.Invoke("[主动重连] 连接已断开, 重新发起连接请求…", LogLevel.Info);
+            CleanupDevice();
+            await ConnectAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _keepAliveBusy, 0);
+        }
+    }
+
+    /// <summary>释放当前连接对象 (下次保活循环会重新发起)</summary>
+    private void CleanupDevice()
+    {
+        if (_device != null)
+        {
+            _device.ConnectionStatusChanged -= OnConnectionChanged;
+            _device.Dispose();
+            _device = null;
+        }
+        _session?.Dispose();
+        _session = null;
+        _char = null;
+        _heartbeatFailures = 0;
     }
 
     private void OnConnectionChanged(BluetoothLEDevice sender, object args)
@@ -207,19 +310,8 @@ public sealed class GattWatcher : IProximityWatcher
     public void Stop()
     {
         _checkTimer.Stop();
-        _retryTimer.Stop();
-        if (_device != null)
-        {
-            _device.ConnectionStatusChanged -= OnConnectionChanged;
-            if (_session != null)
-            {
-                _session.MaintainConnection = false;
-                _session.Dispose();
-                _session = null;
-            }
-            _device.Dispose();
-            _device = null;
-        }
+        _keepAliveTimer.Stop();
+        CleanupDevice();
         _everConnected = false;
         _locked = false;
         _requireSignalRecovery = false;
