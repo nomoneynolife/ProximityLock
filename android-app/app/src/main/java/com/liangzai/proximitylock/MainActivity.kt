@@ -91,6 +91,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // 自启动 / 后台运行: 各家 ROM 私有页面, 只能跳转过去让用户自己点
+        findViewById<Button>(R.id.btnOem).setOnClickListener {
+            OemSettings.openAutoStart(this)
+            Toast.makeText(
+                this,
+                "把 ProximityLock 设为「允许自启动」+「允许后台高耗电」, 之后划掉后台也能自动恢复",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        // 长按同一按钮 → 后台省电策略页 (vivo 等把高耗电单独放在一处)
+        findViewById<Button>(R.id.btnOem).setOnLongClickListener {
+            OemSettings.openPowerSettings(this)
+            Toast.makeText(this, "把本应用设为「允许后台高耗电 / 不受限制」", Toast.LENGTH_LONG).show()
+            true
+        }
+
         // 完全退出: 停后台服务 + 关掉本界面 (之后靠开机自启/手动打开才恢复)
         findViewById<Button>(R.id.btnExit).setOnClickListener {
             PrefStore.setWantRunning(this, false)   // 标记"不要跑", 看门狗和开机自启都不再拉起
