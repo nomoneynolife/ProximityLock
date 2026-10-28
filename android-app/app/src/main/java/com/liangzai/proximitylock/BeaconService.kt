@@ -3,6 +3,7 @@ package com.liangzai.proximitylock
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.AdvertiseCallback
@@ -54,11 +55,30 @@ class BeaconService : Service() {
         return START_STICKY
     }
 
+    /**
+     * 用户从最近任务里划掉 App: 服务继续跑 (前台服务 + START_STICKY)。
+     * 部分 ROM 会顺手掐掉, 这里再主动兜一次 —— 只要没被用户点"完全退出", 就恢复广播。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (!isRunning) {
+            startAdvertising()
+            isRunning = true
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         advertiser?.stopAdvertising(callback)
         gattServer?.close()
         gattServer = null
         isRunning = false
+        // 停止时一并撤掉常驻通知 (完全退出时通知栏不留残影)
+        if (Build.VERSION.SDK_INT >= 24) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         super.onDestroy()
     }
 
@@ -125,20 +145,32 @@ class BeaconService : Service() {
                 NotificationChannel(CHANNEL_ID, "接近解锁服务", NotificationManager.IMPORTANCE_LOW)
             )
         }
+
+        // 点通知栏 → 打开 App
+        val openApp = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification: Notification = if (Build.VERSION.SDK_INT >= 33) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Proximity Lock")
-                .setContentText("蓝牙连接模式运行中, PC 端保持连接")
+                .setContentText("蓝牙连接模式运行中, 点此打开 App")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
+                .setContentIntent(openApp)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Proximity Lock")
-                .setContentText("蓝牙连接模式运行中, PC 端保持连接")
+                .setContentText("蓝牙连接模式运行中, 点此打开 App")
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setOngoing(true)
+                .setContentIntent(openApp)
                 .build()
         }
 

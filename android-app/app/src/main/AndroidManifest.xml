@@ -37,6 +37,7 @@
         <service
             android:name=".BeaconService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
 
         <receiver

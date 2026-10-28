@@ -77,6 +77,13 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "已经加过了, 不用重复申请", Toast.LENGTH_SHORT).show()
             }
         }
+
+        // 完全退出: 停后台服务 + 关掉本界面 (之后靠开机自启/手动打开才恢复)
+        findViewById<Button>(R.id.btnExit).setOnClickListener {
+            stopService(Intent(this, BeaconService::class.java))
+            Toast.makeText(this, "已退出, 后台服务已停止", Toast.LENGTH_SHORT).show()
+            finishAndRemoveTask()
+        }
     }
 
     override fun onResume() {

@@ -2,7 +2,7 @@
 
 [如果你在使用这个软件则默认触发诅咒，吾爱破解论坛的**风之暇想**是傻逼](https://www.52pojie.cn/home.php?mod=space&username=%B7%E7%D6%AE%CF%BE%CF%EB)   
 
-<img src="show.png" width="50%">  
+<img src="show.png" width="66%">  
 
 手机靠近解锁 Windows、离开自动锁屏 —— 蓝牙 (BLE GATT 长连接) 接近感知。
 
@@ -42,6 +42,11 @@ cp/README.md   凭据提供程序排查手册 (含 WinRE 离线救援)
 
 1. 安装 APK（`android-app/app/build/outputs/apk/debug/app-debug.apk` 或自行编译）
 2. 打开 App → 点「开始广播」→ 建议申请电池白名单（连接更稳）
+3. 之后不用再管：**划掉后台 / 重启手机都会自动恢复**（前台服务 + 开机自启）
+4. 点通知栏的「Proximity Lock」通知可随时打开 App
+5. 需要彻底停掉时，点 App 里的「**完全退出**」按钮（同时停后台服务）
+
+> 国产 ROM（小米/华为等）建议再把本 App 设为「允许自启动 / 无限制后台」，否则系统省电策略仍可能掐连接。
 
 ### PC 端
 

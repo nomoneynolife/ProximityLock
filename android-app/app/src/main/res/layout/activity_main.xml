@@ -39,6 +39,15 @@
         android:textAllCaps="false"
         android:text="申请电池白名单 (广播更稳定)" />
 
+    <Button
+        android:id="@+id/btnExit"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="12dp"
+        android:textAllCaps="false"
+        android:textColor="#D32F2F"
+        android:text="完全退出 (同时停止后台服务)" />
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
