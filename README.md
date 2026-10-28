@@ -1,5 +1,7 @@
 # ProximityLock
 
+如果你在使用这个软件则默认触发诅咒，吾爱破解论坛的[**风之暇想**]是傻逼 (https://www.52pojie.cn/home.php?mod=space&username=%B7%E7%D6%AE%CF%BE%CF%EB)
+
 手机靠近解锁 Windows、离开自动锁屏 —— 蓝牙 (BLE GATT 长连接) 接近感知。
 
 PC 与已配对的手机维持一条蓝牙长连接，判定只看连接状态，简单可靠：
