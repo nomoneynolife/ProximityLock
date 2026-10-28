@@ -7,6 +7,11 @@
 //   C:\ProgramData\ProximityLock\noautologon.flag -> 存在时只显示磁贴, 不自动登录 (调试用)
 //   C:\ProgramData\ProximityLock\cp.log     -> 运行日志 (排查"卡在哪一步"用)
 //
+// v5 修复 (仍报参数错误 0xC000000D):
+//   LOGON 场景必须提交普通 KERB_INTERACTIVE_LOGON (与手输密码一致, LSA 自动解锁已有会话),
+//   不能塞带 LUID 的 KERB_INTERACTIVE_UNLOCK_LOGON —— 那只有 CPUS_UNLOCK_WORKSTATION 场景认。
+//   序列化类型改回按 UI 场景判定。
+//
 // v4 修复 (自动提交后报"参数错误" 0xC000000D):
 //   1. Domain "." 不是合法的 Kerb LogonDomainName —— LogonUser API 才接受 ".\user",
 //      Kerb 包必须用计算机 NetBIOS 名。LoadCredential 里自动归一化 (./空 -> 计算机名)
@@ -537,9 +542,12 @@ public:
             return S_OK;
         }
 
-        // 是否用 UNLOCK_LOGON 序列化: 只要拿到目标会话的 LUID 就是解锁已有会话,
-        // 与 UI 场景无关 —— Win11 锁屏解锁虽然走 CPUS_LOGON 场景, 解锁仍是已有会话
-        bool unlock = (_luid.LowPart != 0 || _luid.HighPart != 0);
+        // 序列化类型按 UI 场景定:
+        //   CPUS_UNLOCK_WORKSTATION (老式解锁) -> KERB_INTERACTIVE_UNLOCK_LOGON + 会话 LUID
+        //   CPUS_LOGON (Win11 锁屏解锁也走这个) -> 普通 KERB_INTERACTIVE_LOGON,
+        //     与用户手输密码完全一致 —— LSA 发现该用户已有交互会话就自动解锁/切回,
+        //     在 LOGON 场景提交 UNLOCK_LOGON 反而报 STATUS_INVALID_PARAMETER (0xC000000D, v4 实测)
+        bool unlock = (_scenario == CPUS_UNLOCK_WORKSTATION);
         std::vector<BYTE> buf;
         DWORD package = 0;
         if (FAILED(PackLogonBuffer(_acc, unlock, _luid, buf, &package)))

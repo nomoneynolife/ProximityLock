@@ -1,57 +1,23 @@
-[10:12:37.915][tid  7820] === DLL_PROCESS_ATTACH pid=5596 ===
-[10:12:37.915][tid  7820] --- CProvider created (pid 5596) ---
-[10:12:37.915][tid  7820] SetUsageScenario: 2
-[10:12:37.915][tid  7820] GetInteractiveLuid: user=administrator mySession=1 consoleSession=1
-[10:12:37.915][tid  7820] GetInteractiveLuid: candidate session=1 luid=0:197577
-[10:12:37.915][tid  7820] EnsureCache: user=administrator domain=. luidOk=1 luid=0:197577
-[10:12:37.915][tid  7820] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
-[10:12:37.915][tid  7820] SetSelected -> FALSE
-[10:12:37.931][tid  7820] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
-[10:12:37.947][tid  7820] --- CProvider destroyed ---
-[10:14:24.797][tid  2356] === DLL_PROCESS_ATTACH pid=5852 ===
-[10:14:24.797][tid  2356] --- CProvider created (pid 5852) ---
-[10:14:24.922][tid  2356] SetUsageScenario: 1
-[10:14:24.922][tid  2356] Advise: context=0x6
-[10:14:24.922][tid  2356] watcher started: 0000000000000A94
-[10:14:24.938][tid  2356] GetInteractiveLuid: user=administrator mySession=1 consoleSession=1
-[10:14:24.938][tid  2356] GetInteractiveLuid: candidate session=1 luid=0:197577
-[10:14:24.938][tid  2356] EnsureCache: user=administrator domain=. luidOk=1 luid=0:197577
-[10:14:24.938][tid  2356] GetCredentialCount: near=1 -> 1 credential, autologon=0 (flag=1 blocked=0)
-[10:14:24.938][tid  2356] SetSelected -> FALSE
-[10:14:25.188][tid  2356] SetSelected -> FALSE
-[10:14:25.735][tid  5508] watcher: near became 1 -> CredentialsChanged
-[10:14:25.735][tid  5508] watcher: CredentialsChanged returned
-[10:14:25.735][tid  2356] GetCredentialCount: near=1 -> 1 credential, autologon=0 (flag=1 blocked=0)
-[10:14:25.751][tid  2356] SetSelected -> FALSE
-[10:14:26.938][tid  2356] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
-[10:14:26.953][tid  2356] ReportResult: status=0xC000000D sub=0x00000000
-[10:14:26.953][tid  2356] *** auto-logon BLOCKED after failure (手动点提交仍可用) ***
-[10:14:28.235][tid  2356] SetSelected -> FALSE
-[10:14:32.125][tid  2356] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
-[10:14:32.125][tid  2356] ReportResult: status=0xC000000D sub=0x00000000
-[10:14:32.859][tid  2356] SetSelected -> FALSE
-[10:14:47.034][tid  2356] UnAdvise
-[10:14:47.706][tid  2356] watcher stopped
-[10:14:47.706][tid  2356] --- CProvider destroyed ---
-[10:15:12.473][tid  6792] === DLL_PROCESS_ATTACH pid=6940 ===
-[10:15:12.473][tid  6792] --- CProvider created (pid 6940) ---
-[10:15:12.536][tid  6792] SetUsageScenario: 1
-[10:15:12.552][tid  6792] Advise: context=0x6
-[10:15:12.552][tid  6792] watcher started: 0000000000000AA0
-[10:15:12.552][tid  6792] GetInteractiveLuid: user=administrator mySession=1 consoleSession=1
-[10:15:12.552][tid  6792] GetInteractiveLuid: candidate session=1 luid=0:197577
-[10:15:12.552][tid  6792] EnsureCache: user=administrator domain=. luidOk=1 luid=0:197577
-[10:15:12.552][tid  6792] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
-[10:15:13.364][tid  4284] watcher: near became 1 -> CredentialsChanged
-[10:15:13.364][tid  4284] watcher: CredentialsChanged returned
-[10:15:13.364][tid  6792] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
-[10:15:13.364][tid  6792] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
-[10:15:13.380][tid  6792] ReportResult: status=0xC000000D sub=0x00000000
-[10:15:13.380][tid  6792] *** auto-logon BLOCKED after failure (手动点提交仍可用) ***
-[10:15:18.051][tid  6792] SetSelected -> FALSE
-[10:15:25.816][tid  6792] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=104
-[10:15:25.832][tid  6792] ReportResult: status=0xC000000D sub=0x00000000
-[10:17:01.463][tid  6792] SetSelected -> FALSE
-[10:17:06.506][tid  6792] UnAdvise
-[10:17:07.194][tid  6792] watcher stopped
-[10:17:07.194][tid  6792] --- CProvider destroyed ---
+[10:31:40.811][tid  3940] === DLL_PROCESS_ATTACH pid=8332 ===
+[10:31:40.811][tid  3940] --- CProvider created (pid 8332) ---
+[10:31:40.905][tid  3940] SetUsageScenario: 1
+[10:31:40.905][tid  3940] Advise: context=0x6
+[10:31:40.905][tid  3940] watcher started: 0000000000000A8C
+[10:31:40.905][tid  3940] LoadCredential: domain '.' normalized to computer name 'DESKTOP-1L5P2R6'
+[10:31:40.905][tid  3940] GetInteractiveLuid: user=administrator mySession=1 consoleSession=1
+[10:31:40.905][tid  3940] GetInteractiveLuid: candidate session=1 luid=0:120276
+[10:31:40.905][tid  3940] EnsureCache: user=administrator domain=DESKTOP-1L5P2R6 luidOk=1 luid=0:120276
+[10:31:40.905][tid  3940] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
+[10:31:41.718][tid  6752] watcher: near became 1 -> CredentialsChanged
+[10:31:41.718][tid  6752] watcher: CredentialsChanged returned
+[10:31:41.718][tid  3940] GetCredentialCount: near=1 -> 1 credential, autologon=1 (flag=0 blocked=0)
+[10:31:41.718][tid  3940] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=140
+[10:31:41.764][tid  3940] ReportResult: status=0xC000000D sub=0x00000000
+[10:31:41.764][tid  3940] *** auto-logon BLOCKED after failure (手动点提交仍可用) ***
+[10:31:43.139][tid  3940] SetSelected -> FALSE
+[10:31:44.530][tid  3940] GetSerialization: OK unlock=1 user=administrator pkg=0 bytes=140
+[10:31:44.545][tid  3940] ReportResult: status=0xC000000D sub=0x00000000
+[10:31:45.357][tid  3940] SetSelected -> FALSE
+[10:31:49.388][tid  3940] UnAdvise
+[10:31:49.888][tid  3940] watcher stopped
+[10:31:49.888][tid  3940] --- CProvider destroyed ---
