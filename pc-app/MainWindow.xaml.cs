@@ -23,8 +23,11 @@ public partial class MainWindow : Window
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "ProximityLock", "config.json");
 
-    private BeaconWatcher? _watcher;
+    private IProximityWatcher? _watcher;
     private readonly DispatcherTimer _uiTimer;
+
+    /// <summary>连接模式下拉框里的一项 (已配对的 BLE 设备)</summary>
+    public sealed record PairedDevice(string Display, ulong Address, string Name);
 
     // 托盘
     private System.Windows.Forms.NotifyIcon? _trayIcon;
@@ -50,6 +53,7 @@ public partial class MainWindow : Window
         InitAutoStart();
         InitAutoUnlock();
         InitVersionFooter();
+        _ = LoadPairedDevicesAsync();
 
         Loaded += (_, _) =>
         {
@@ -334,10 +338,41 @@ public partial class MainWindow : Window
 
     private static void SaveConfig(string uuid, string seed)
     {
+        SaveConfigFull(uuid, seed, LoadConfigDevice());
+    }
+
+    private static (ulong Address, string Name)? LoadConfigDevice()
+    {
+        try
+        {
+            if (!File.Exists(ConfigPath)) return null;
+            var json = JsonDocument.Parse(File.ReadAllText(ConfigPath));
+            if (!json.RootElement.TryGetProperty("deviceAddress", out var a)) return null;
+            if (!ulong.TryParse(a.GetString(), out var addr)) return null;
+            var name = json.RootElement.TryGetProperty("deviceName", out var n) ? n.GetString() ?? "" : "";
+            return (addr, name);
+        }
+        catch { return null; }
+    }
+
+    private static void SaveConfigFull(string uuid, string seed, (ulong Address, string Name)? device)
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
         File.WriteAllText(ConfigPath,
-            JsonSerializer.Serialize(new { uuid, seed },
-                new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(new
+            {
+                uuid,
+                seed,
+                deviceAddress = device?.Address.ToString() ?? null,
+                deviceName = device?.Name ?? null,
+            },
+            new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private void SaveSelectedDevice()
+    {
+        SaveConfigFull(UuidBox.Text.Trim(), EffectiveSeed,
+            DeviceBox.SelectedItem as PairedDevice is { } d ? (d.Address, d.Name) : null);
     }
 
     private string EffectiveSeed
@@ -456,11 +491,74 @@ public partial class MainWindow : Window
         _watcher.Dispose();
         _watcher = null;
         SignalList.Items.Clear();
-        NoSignalText.Text = "UUID 已变更, 重新点“开始监听”";
+        NoSignalText.Text = "配置已变更, 重新点“开始监听”";
         NoSignalText.Visibility = Visibility.Visible;
         StartBtn.IsEnabled = true;
         StopBtn.IsEnabled = false;
         UuidBox.IsEnabled = true;
+        DeviceBox.IsEnabled = true;
+    }
+
+    // ---------- 连接模式: 已配对 BLE 设备 ----------
+
+    /// <summary>枚举系统里已配对的 BLE 设备 (手机在 Windows 蓝牙设置里配对一次即可出现在这里)</summary>
+    private async Task LoadPairedDevicesAsync()
+    {
+        try
+        {
+            var selector = Windows.Devices.Bluetooth.BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
+            var devices = await Windows.Devices.Enumeration.DeviceInformation.FindAllAsync(selector);
+
+            var items = new List<PairedDevice>();
+            foreach (var di in devices)
+            {
+                var addr = ParseBleAddress(di.Id);
+                if (addr == null) continue;
+                var name = string.IsNullOrWhiteSpace(di.Name) ? $"BLE 设备 ({di.Id[^8..]})" : di.Name;
+                items.Add(new PairedDevice($"{name}", addr.Value, name));
+            }
+
+            // 恢复上次的选择
+            var saved = LoadConfigDevice();
+            DeviceBox.ItemsSource = items;
+            if (saved != null)
+            {
+                var hit = items.FirstOrDefault(d => d.Address == saved.Value.Address);
+                if (hit != null)
+                {
+                    DeviceBox.SelectedItem = hit;
+                    AppendLog($"已选择连接模式设备: {hit.Display} (开始监听时生效)", LogLevel.Info);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"枚举蓝牙设备失败: {ex.Message}", LogLevel.Warn);
+        }
+    }
+
+    /// <summary>从 DeviceInformation.Id (形如 BluetoothLE#BluetoothLEaa:bb:..-..) 解析蓝牙地址</summary>
+    private static ulong? ParseBleAddress(string id)
+    {
+        const string prefix = "BluetoothLE#BluetoothLE";
+        if (id.Length < prefix.Length + 17 || !id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+        var mac = id.Substring(prefix.Length, 17).Replace(":", "");
+        return ulong.TryParse(mac, System.Globalization.NumberStyles.HexNumber, null, out var v)
+            ? v : null;
+    }
+
+    private void RefreshDevicesBtn_Click(object sender, RoutedEventArgs e)
+    {
+        DeviceBox.ItemsSource = null;
+        _ = LoadPairedDevicesAsync();
+        AppendLog("正在刷新已配对设备列表…", LogLevel.Info);
+    }
+
+    private void DeviceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || DeviceBox == null) return;
+        SaveSelectedDevice();
     }
 
     // ---------- 监听控制 ----------
@@ -479,12 +577,28 @@ public partial class MainWindow : Window
         }
 
         _watcher?.Dispose();
-        _watcher = new BeaconWatcher(uuid, (int)RssiSlider.Value, lostTimeout)
+        SaveSelectedDevice();
+
+        if (DeviceBox.SelectedItem is PairedDevice dev)
         {
-            SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
-        };
-        if (EffectiveSeed.Length > 0)
-            AppendLog("滚动 UUID 模式: 正在按种子动态识别目标手机。", LogLevel.Info);
+            // 连接模式: GATT 长连接, 熄屏不误判
+            _watcher = new GattWatcher(dev.Address, dev.Name, (int)RssiSlider.Value, lostTimeout)
+            {
+                TargetUuid = uuid,
+                SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
+            };
+            AppendLog($"连接模式: 已选设备 {dev.Display}。判定依据 = GATT 连接是否在线。", LogLevel.Info);
+        }
+        else
+        {
+            // 广播模式: 扫 iBeacon RSSI
+            _watcher = new BeaconWatcher(uuid, (int)RssiSlider.Value, lostTimeout)
+            {
+                SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
+            };
+            if (EffectiveSeed.Length > 0)
+                AppendLog("滚动 UUID 模式: 正在按种子动态识别目标手机。", LogLevel.Info);
+        }
         _watcher.Log += (msg, level) => Dispatcher.Invoke(() => AppendLog(msg, level));
 
         _watcher.Start();
@@ -493,6 +607,7 @@ public partial class MainWindow : Window
         StartBtn.IsEnabled = false;
         StopBtn.IsEnabled = true;
         UuidBox.IsEnabled = false;
+        DeviceBox.IsEnabled = false;
     }
 
     private void StopBtn_Click(object sender, RoutedEventArgs e)
@@ -509,6 +624,7 @@ public partial class MainWindow : Window
         StartBtn.IsEnabled = true;
         StopBtn.IsEnabled = false;
         UuidBox.IsEnabled = true;
+        DeviceBox.IsEnabled = true;
         RssiValueText.Text = $"{(int)RssiSlider.Value} dBm (阈值)";
     }
 
@@ -523,9 +639,52 @@ public partial class MainWindow : Window
         if (_watcher == null) return;
 
         SignalList.Items.Clear();
-        var list = _watcher.Snapshot();
 
-        if (list.Count == 0)
+        // 连接模式: 按连接状态显示 (熄屏不广播, RSSI 不是主要依据)
+        if (_watcher is GattWatcher g)
+        {
+            if (g.IsConnected)
+            {
+                NoSignalText.Visibility = Visibility.Collapsed;
+                SignalList.Items.Add(new TextBlock
+                {
+                    Padding = new Thickness(0, 2, 0, 2),
+                    FontFamily = new FontFamily("Consolas"),
+                    FontSize = 12,
+                    Foreground = Brushes.Green,
+                    FontWeight = FontWeights.Bold,
+                    Text = $"[目标手机·已连接] {g.DeviceName}  GATT 在线 (断开 {g.LostTimeoutSeconds}s 后锁屏)",
+                });
+            }
+            else
+            {
+                var list = g.Snapshot();
+                if (list.Count == 0)
+                {
+                    NoSignalText.Text = $"未连接 {g.DeviceName} — 手机在蓝牙范围内吗? (断开超过 {g.LostTimeoutSeconds}s 会锁屏)";
+                    NoSignalText.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    NoSignalText.Visibility = Visibility.Collapsed;
+                    var b = list[0];
+                    SignalList.Items.Add(new TextBlock
+                    {
+                        Padding = new Thickness(0, 2, 0, 2),
+                        FontFamily = new FontFamily("Consolas"),
+                        FontSize = 12,
+                        Foreground = Brushes.Orange,
+                        FontWeight = FontWeights.Bold,
+                        Text = $"[目标手机·连接断开] 最后广播 RSSI={b.AvgRssi} dBm  · {b.AgeSeconds:F0}s 前",
+                    });
+                }
+            }
+            return;
+        }
+
+        // 广播模式
+        var advList = _watcher.Snapshot();
+        if (advList.Count == 0)
         {
             NoSignalText.Text = "正在扫描, 未发现目标手机 (手机开广播了吗? UUID 一致吗?)";
             NoSignalText.Visibility = Visibility.Visible;
@@ -533,7 +692,7 @@ public partial class MainWindow : Window
         }
         NoSignalText.Visibility = Visibility.Collapsed;
 
-        foreach (var b in list)
+        foreach (var b in advList)
         {
             // 绿 = 达到阈值 (在附近, 可自动解锁); 橙 = 收得到但低于阈值 (远处, 不算在附近)
             bool close = b.AvgRssi >= _watcher.RssiThreshold;

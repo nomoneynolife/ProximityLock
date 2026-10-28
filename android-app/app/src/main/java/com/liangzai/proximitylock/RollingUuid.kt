@@ -40,6 +40,24 @@ object RollingUuid {
 
     fun isValidSeed(text: String): Boolean =
         text.length == 32 && text.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
+
+    /**
+     * GATT 特征值令牌 (PC 端连接后读取, 验证"连上的真是我们的手机"):
+     * 滚动模式 = HMAC(seed, 当前时间片) 前 16 字节; 固定模式 = 固定 UUID 的 16 字节。
+     * 与 PC 端 GattWatcher 的验证逻辑对应。
+     */
+    fun tokenBytes(seed: String?, fallbackUuid: UUID): ByteArray {
+        if (seed != null && isValidSeed(seed)) {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(seed.hexToBytes(), "HmacSHA256"))
+            val msg = ByteBuffer.allocate(8).putLong(sliceAt()).array()
+            return mac.doFinal(msg).copyOfRange(0, 16)
+        }
+        return ByteBuffer.allocate(16)
+            .putLong(fallbackUuid.mostSignificantBits)
+            .putLong(fallbackUuid.leastSignificantBits)
+            .array()
+    }
 }
 
 fun String.hexToBytes(): ByteArray =

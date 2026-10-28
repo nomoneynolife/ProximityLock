@@ -3,6 +3,8 @@
 
     <!-- 蓝牙广播权限 (Android 12+) -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!-- GATT 服务器 (连接模式, Android 12+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- 兼容 Android 11 及以下 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />

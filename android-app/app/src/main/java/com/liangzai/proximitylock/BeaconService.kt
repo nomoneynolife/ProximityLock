@@ -28,12 +28,18 @@ class BeaconService : Service() {
         private const val CHANNEL_ID = "beacon_channel"
         private const val NOTIF_ID = 1
         private const val TX_POWER_CALIBRATION: Byte = -59 // 距手机 1 米处的参考 RSSI
+
+        // 连接模式: PC 端连接该 GATT 服务并读取令牌验证身份 (与 PC 端 GattWatcher 对应)
+        val SERVICE_UUID: UUID = UUID.fromString("9A660001-C77B-4A9D-B5E3-1D6B7A9E2C11")
+        val CHAR_UUID: UUID = UUID.fromString("9A660002-C77B-4A9D-B5E3-1D6B7A9E2C11")
     }
 
     private val advertiser by lazy {
         (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager)
             .adapter?.bluetoothLeAdvertiser
     }
+
+    private var gattServer: android.bluetooth.BluetoothGattServer? = null
 
     private val callback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
@@ -55,6 +61,8 @@ class BeaconService : Service() {
     override fun onDestroy() {
         rotateHandler.removeCallbacks(rotateRunnable)
         advertiser?.stopAdvertising(callback)
+        gattServer?.close()
+        gattServer = null
         isRunning = false
         super.onDestroy()
     }
@@ -89,15 +97,19 @@ class BeaconService : Service() {
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(false)
+            // 可连接: 连接模式下 PC 端要能连上来 (iBeacon 走广播包, 服务 UUID 走扫描响应)
+            .setConnectable(true)
             .build()
 
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addManufacturerData(0x004C, payload) // Apple 厂商 ID, iBeacon 走这里
             .build()
+        // 注: 服务 UUID 不放广播里 (31 字节放不下 iBeacon+UUID),
+        // PC 端连接后用 GetGattServicesAsync 主动发现, 不依赖广播里的 UUID。
 
         advertiser?.startAdvertising(settings, data, callback)
+        startGattServer()
 
         // 滚动模式: 定时到下一个分钟整点换 UUID
         rotateHandler.removeCallbacks(rotateRunnable)
@@ -106,6 +118,49 @@ class BeaconService : Service() {
             val delay = (nextBoundaryMs - System.currentTimeMillis()).coerceAtLeast(1000L)
             rotateHandler.postDelayed(rotateRunnable, delay)
         }
+    }
+
+    /** 连接模式: PC 读取令牌特征值验证"连上的真是我们的手机" */
+    private fun startGattServer() {
+        if (gattServer != null) return
+        val server = try {
+            (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager)
+                .openGattServer(this, gattCallback)
+        } catch (_: SecurityException) {
+            null
+        } ?: return
+
+        val service = android.bluetooth.BluetoothGattService(
+            SERVICE_UUID, android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        val char = android.bluetooth.BluetoothGattCharacteristic(
+            CHAR_UUID,
+            android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ,
+            android.bluetooth.BluetoothGattCharacteristic.PERMISSION_READ)
+        service.addCharacteristic(char)
+        server.addService(service)
+        gattServer = server
+    }
+
+    private val gattCallback = object : android.bluetooth.BluetoothGattServerCallback() {
+        override fun onCharacteristicReadRequest(
+            device: android.bluetooth.BluetoothDevice?, requestId: Int,
+            offset: Int, characteristic: android.bluetooth.BluetoothGattCharacteristic?
+        ) {
+            val value = if (characteristic?.uuid == CHAR_UUID) {
+                RollingUuid.tokenBytes(UuidStore.getSeed(this@BeaconService), currentFixedUuid())
+            } else null
+            gattServer?.sendResponse(
+                device, requestId,
+                if (value != null) android.bluetooth.BluetoothGatt.GATT_SUCCESS
+                else android.bluetooth.BluetoothGatt.GATT_FAILURE,
+                0, value)
+        }
+    }
+
+    private fun currentFixedUuid(): UUID = try {
+        UUID.fromString(UuidStore.get(this))
+    } catch (_: IllegalArgumentException) {
+        UUID.fromString(UuidStore.DEFAULT)
     }
 
     /** 组装 iBeacon 帧: 0x02,0x15 + UUID(16B) + Major(2B) + Minor(2B) + TxPower(1B) */

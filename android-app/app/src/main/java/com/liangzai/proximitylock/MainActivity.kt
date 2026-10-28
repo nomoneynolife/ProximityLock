@@ -199,7 +199,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasRequiredPermissions(): Boolean {
         val needed = buildList {
-            if (Build.VERSION.SDK_INT >= 31) add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+            if (Build.VERSION.SDK_INT >= 31) {
+                add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+                add(android.Manifest.permission.BLUETOOTH_CONNECT) // GATT 服务器
+            }
             if (Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         return needed.all {
@@ -230,7 +233,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensurePermissions(): Boolean {
         val needed = buildList {
-            if (Build.VERSION.SDK_INT >= 31) add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+            if (Build.VERSION.SDK_INT >= 31) {
+                add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+                add(android.Manifest.permission.BLUETOOTH_CONNECT) // GATT 服务器
+            }
             if (Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         val missing = needed.filter {

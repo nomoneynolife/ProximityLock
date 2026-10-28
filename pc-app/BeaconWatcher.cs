@@ -12,7 +12,7 @@ public sealed record BeaconInfo(Guid Uuid, int AvgRssi, double AgeSeconds, bool 
 /// <summary>
 /// 监听安卓端发出的 iBeacon 广播，根据 RSSI 判定手机是否离开，触发锁屏。
 /// </summary>
-public sealed class BeaconWatcher : IDisposable
+public sealed class BeaconWatcher : IProximityWatcher
 {
     // iBeacon 帧格式: 厂商数据 (Apple 0x004C): [0x02, 0x15, UUID 16字节, Major 2字节, Minor 2字节, TxPower 1字节]
     private const ushort AppleCompanyId = 0x004C;

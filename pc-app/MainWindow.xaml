@@ -17,6 +17,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -71,7 +72,22 @@
         <TextBox Grid.Row="7" x:Name="LostTimeoutBox" Text="8" Margin="0,0,0,12" Padding="6" Width="120"
                  HorizontalAlignment="Left"/>
 
-        <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="0,0,0,12">
+        <TextBlock Grid.Row="8" FontWeight="SemiBold" Margin="0,0,0,4">
+            <Run Text="连接模式设备 (可选)"/>
+            <Run Text="  选已配对的手机 = 连接模式 (熄屏不误判); 不选 = 广播模式" Foreground="#888888" FontWeight="Normal" FontSize="11"/>
+        </TextBlock>
+        <Grid Grid.Row="9" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox x:Name="DeviceBox" Padding="6" VerticalContentAlignment="Center"
+                      DisplayMemberPath="Display" SelectionChanged="DeviceBox_SelectionChanged"/>
+            <Button Grid.Column="1" x:Name="RefreshDevicesBtn" Content="刷新设备" Width="72" Height="30"
+                    Margin="8,0,0,0" Click="RefreshDevicesBtn_Click"/>
+        </Grid>
+
+        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,12">
             <Button x:Name="StartBtn" Content="开始监听" Width="110" Height="32" Margin="0,0,10,0"
                     Click="StartBtn_Click"/>
             <Button x:Name="StopBtn" Content="停止" Width="110" Height="32" Margin="0,0,10,0"
@@ -82,12 +98,12 @@
                       Checked="AutoStart_Changed" Unchecked="AutoStart_Changed"/>
         </StackPanel>
 
-        <CheckBox Grid.Row="9" x:Name="AutoUnlockCheck" Margin="0,0,0,12"
+        <CheckBox Grid.Row="11" x:Name="AutoUnlockCheck" Margin="0,0,0,12"
                   Content="手机靠近自动解锁 (勾选后自动安装解锁组件, 需 UAC 授权; 仅本地账号)"
                   Checked="AutoUnlock_Changed" Unchecked="AutoUnlock_Changed"/>
 
-        <TextBlock Grid.Row="10" Text="实时信号 (绿色 = 在附近, 橙色 = 信号弱会锁屏)" FontWeight="SemiBold" Margin="0,0,0,4"/>
-        <Border Grid.Row="11" Background="#F4F4F4" CornerRadius="6" Padding="8">
+        <TextBlock Grid.Row="12" Text="实时信号 (绿色 = 在附近, 橙色 = 信号弱会锁屏)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <Border Grid.Row="13" Background="#F4F4F4" CornerRadius="6" Padding="8">
             <Grid>
                 <TextBlock x:Name="NoSignalText" Foreground="#999999" VerticalAlignment="Top"
                            Text="尚未收到任何 iBeacon — 检查手机广播是否开启 / PC 蓝牙是否可用"/>
@@ -95,7 +111,7 @@
             </Grid>
         </Border>
 
-        <RichTextBox Grid.Row="12" x:Name="LogBox" Margin="0,12,0,0" Background="#FAFAFA"
+        <RichTextBox Grid.Row="14" x:Name="LogBox" Margin="0,12,0,0" Background="#FAFAFA"
                      BorderBrush="#DDDDDD" BorderThickness="1" IsReadOnly="True"
                      VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
 
