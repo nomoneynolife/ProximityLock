@@ -23,6 +23,7 @@ public sealed class GattWatcher : IProximityWatcher
         new("9A660002-C77B-4A9D-B5E3-1D6B7A9E2C11");
 
     private readonly ulong _address;
+    private readonly string? _deviceId;   // DeviceInformation.Id: Windows 知道地址类型, 优先用它
     private readonly string _deviceName;
 
     private BluetoothLEDevice? _device;
@@ -61,9 +62,11 @@ public sealed class GattWatcher : IProximityWatcher
     public event Action<int>? RssiUpdated;
     public event Action<bool>? LockStateChanged;
 
-    public GattWatcher(ulong address, string deviceName, int rssiThreshold, int lostTimeout)
+    public GattWatcher(ulong address, string? deviceId, string deviceName,
+        int rssiThreshold, int lostTimeout)
     {
         _address = address;
+        _deviceId = string.IsNullOrWhiteSpace(deviceId) ? null : deviceId;
         _deviceName = string.IsNullOrWhiteSpace(deviceName) ? $"BLE:{address:X12}" : deviceName;
         TargetUuid = Guid.Empty;
         RssiThreshold = rssiThreshold;
@@ -98,7 +101,23 @@ public sealed class GattWatcher : IProximityWatcher
         if (_device != null) return;
         try
         {
-            var device = await BluetoothLEDevice.FromBluetoothAddressAsync(_address);
+            // 优先用设备 ID 连接: 配对时 Windows 缓存了地址类型。
+            // 直接 FromBluetoothAddressAsync(默认 Public) 对用随机地址 (RPA) 广播的手机会失败。
+            BluetoothLEDevice? device = null;
+            if (_deviceId != null)
+            {
+                device = await BluetoothLEDevice.FromIdAsync(_deviceId);
+            }
+            if (device == null)
+            {
+                // 随机地址重试 (手机 LE 广播几乎都用 random address)
+                device = await BluetoothLEDevice.FromBluetoothAddressAsync(
+                    _address, BluetoothAddressType.Random);
+            }
+            if (device == null)
+            {
+                device = await BluetoothLEDevice.FromBluetoothAddressAsync(_address);
+            }
             if (device == null)
             {
                 // 手机当前不在广播 (熄屏/不在范围) —— 15 秒后重试, 不锁屏 (还没建立过连接)
@@ -208,11 +227,40 @@ public sealed class GattWatcher : IProximityWatcher
     private void OnAdvReceived(BluetoothLEAdvertisementWatcher sender,
         BluetoothLEAdvertisementReceivedEventArgs args)
     {
-        // 只关心已选设备地址的广播 (手机断连时才会广播)
-        if (args.BluetoothAddress != _address) return;
-        LastRssi = args.RawSignalStrengthInDBm;
-        _lastRssiAt = DateTimeOffset.Now;
-        RssiUpdated?.Invoke(LastRssi);
+        // 手机用随机地址 (RPA) 广播, 地址会变; 按地址过滤会漏 → 解析 iBeacon 帧按 UUID 匹配。
+        // 只用于 UI 显示 RSSI, 判定本身靠 GATT 连接状态。
+        foreach (var section in args.Advertisement.ManufacturerData)
+        {
+            if (section.CompanyId != 0x004C) continue;
+            var data = new byte[section.Data.Length];
+            using (var reader = DataReader.FromBuffer(section.Data))
+            {
+                reader.ReadBytes(data);
+            }
+            if (data.Length < 23 || data[0] != 0x02 || data[1] != 0x15) continue;
+
+            Span<char> hex = stackalloc char[32];
+            for (var i = 0; i < 16; i++) data[i + 2].TryFormat(hex.Slice(i * 2, 2), out _, "x2");
+            var uuid = new Guid($"{hex[0..8]}-{hex[8..12]}-{hex[12..16]}-{hex[16..20]}-{hex[20..32]}");
+
+            if (!IsTargetUuid(uuid)) return;
+            LastRssi = args.RawSignalStrengthInDBm;
+            _lastRssiAt = DateTimeOffset.Now;
+            RssiUpdated?.Invoke(LastRssi);
+            return;
+        }
+    }
+
+    /// <summary>与 BeaconWatcher 一致: 固定模式比对 TargetUuid; 滚动模式比对种子推导的时间片集合</summary>
+    private bool IsTargetUuid(Guid uuid)
+    {
+        if (string.IsNullOrWhiteSpace(SeedHex)) return uuid == TargetUuid;
+        var now = RollingUuid.SliceAt();
+        for (var s = now - 1; s <= now + 1; s++)
+        {
+            if (uuid == RollingUuid.Derive(SeedHex!, s)) return true;
+        }
+        return false;
     }
 
     private void OnConnectionChanged(BluetoothLEDevice sender, object args)

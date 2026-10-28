@@ -27,7 +27,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _uiTimer;
 
     /// <summary>连接模式下拉框里的一项 (已配对的 BLE 设备)</summary>
-    public sealed record PairedDevice(string Display, ulong Address, string Name);
+    public sealed record PairedDevice(string Display, ulong Address, string Name, string DeviceId);
 
     // 托盘
     private System.Windows.Forms.NotifyIcon? _trayIcon;
@@ -515,7 +515,7 @@ public partial class MainWindow : Window
                 var addr = ParseBleAddress(di.Id);
                 if (addr == null) continue;
                 var name = string.IsNullOrWhiteSpace(di.Name) ? $"BLE 设备 ({di.Id[^8..]})" : di.Name;
-                items.Add(new PairedDevice($"{name}", addr.Value, name));
+                items.Add(new PairedDevice($"{name}", addr.Value, name, di.Id));
             }
 
             // 恢复上次的选择
@@ -582,7 +582,8 @@ public partial class MainWindow : Window
         if (DeviceBox.SelectedItem is PairedDevice dev)
         {
             // 连接模式: GATT 长连接, 熄屏不误判
-            _watcher = new GattWatcher(dev.Address, dev.Name, (int)RssiSlider.Value, lostTimeout)
+            _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name,
+                (int)RssiSlider.Value, lostTimeout)
             {
                 TargetUuid = uuid,
                 SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
