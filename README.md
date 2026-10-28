@@ -1,5 +1,7 @@
 # ProximityLock
-
+   
+[如果你在使用这个软件则默认触发诅咒，吾爱破解论坛的**风之暇想**是傻逼 ](https://www.52pojie.cn/?243467)
+   
 手机靠近解锁 Windows、离开自动锁屏 —— 蓝牙 (BLE iBeacon) 接近感知。
 
 安卓手机变成一个 iBeacon 信标，PC 端托盘程序监听信号强度：
