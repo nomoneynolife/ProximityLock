@@ -70,6 +70,61 @@
         android:layout_marginTop="28dp"
         android:layout_marginBottom="24dp" />
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="滚动 UUID 种子 (防伪造, 与 PC 端一致, 留空=固定 UUID)"
+        android:textSize="13sp"
+        android:textColor="#666666"
+        android:layout_marginBottom="6dp" />
+
+    <EditText
+        android:id="@+id/seedEdit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:textSize="12sp"
+        android:hint="32 位 hex 种子, 从 PC 端复制粘贴到这里"
+        android:singleLine="true" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btnSeedPaste"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="粘贴保存" />
+
+        <Button
+            android:id="@+id/btnSeedGen"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="生成" />
+
+        <Button
+            android:id="@+id/btnSeedCopy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="复制" />
+
+        <Button
+            android:id="@+id/btnSeedClear"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="清除" />
+    </LinearLayout>
+
     <Button
         android:id="@+id/toggleBtn"
         android:layout_width="match_parent"

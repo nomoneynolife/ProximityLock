@@ -30,10 +30,26 @@ public sealed class BeaconWatcher : IDisposable
     public int RssiThreshold { get; set; } = -65;   // 约 2-3 米
     public int LostTimeoutSeconds { get; set; } = 8; // 丢包兜底: 熄屏省电会暂停广播, 不能太紧
 
+    /// <summary>滚动 UUID 种子 (32位hex)。非空 = 滚动模式, TargetUuid 不再生效。</summary>
+    public string? SeedHex { get; set; }
+
+    /// <summary>该 UUID 是否目标手机: 固定模式比对 TargetUuid; 滚动模式比对种子推导的时间片集合 (上一片+当前+下一片, 容忍两端时钟差)</summary>
+    private bool IsTarget(Guid uuid)
+    {
+        if (string.IsNullOrWhiteSpace(SeedHex)) return uuid == TargetUuid;
+        var now = RollingUuid.SliceAt();
+        for (long s = now - 1; s <= now + 1; s++)
+        {
+            if (uuid == RollingUuid.Derive(SeedHex!, s)) return true;
+        }
+        return false;
+    }
+
     // 锁屏防抖: 信号变差后需持续低于阈值 GraceSeconds 才锁, 避免误判
     private const int GraceSeconds = 3;
     private DateTimeOffset _belowSince = DateTimeOffset.MaxValue;
     private bool _locked;
+    private DateTimeOffset _lastLockAt = DateTimeOffset.MinValue;
 
     // 实时信号: 所有见过的 iBeacon (目标+未知) -> (平滑RSSI, 最后收到时间)
     private readonly Dictionary<Guid, (double Avg, DateTimeOffset Last)> _beacons = new();
@@ -101,6 +117,15 @@ public sealed class BeaconWatcher : IDisposable
         var now = DateTimeOffset.Now;
         lock (_sync)
         {
+            if (!string.IsNullOrWhiteSpace(SeedHex))
+            {
+                // 滚动模式: UUID 每分钟在变, 不按字典键过滤, 直接用聚合的 EMA/最后收到时间
+                if (!_everSeen) return new List<BeaconInfo>();
+                return new List<BeaconInfo>
+                {
+                    new(TargetUuid, (int)Math.Round(_rssiAvg), (now - _lastSeen).TotalSeconds, true)
+                };
+            }
             return _beacons
                 .Where(kv => kv.Key == TargetUuid)
                 .Select(kv => new BeaconInfo(
@@ -134,7 +159,7 @@ public sealed class BeaconWatcher : IDisposable
                 avg = _beacons.TryGetValue(uuid, out var v) ? v.Avg : double.MinValue;
                 avg = avg == double.MinValue ? rssi : avg * 0.7 + rssi * 0.3;
                 _beacons[uuid] = (avg, now);
-                isTarget = uuid == TargetUuid;
+                isTarget = IsTarget(uuid);
             }
 
             if (isTarget)
@@ -152,8 +177,12 @@ public sealed class BeaconWatcher : IDisposable
     {
         var now = DateTimeOffset.Now;
 
-        // 每轮都把"是否在附近"写出去, 给 Credential Provider 读 (方案C 自动解锁)
-        var nearby = _everSeen && (now - _lastSeen).TotalSeconds <= 3;
+        // 每轮都把"是否在附近"写出去, 给 Credential Provider 读 (方案C 自动解锁)。
+        // 注意: near 必须 = 信号新鲜 且 RSSI 达到阈值。
+        // 只看"3 秒内有信号"的话, 手机在远处 (比如 -80) 广播照样收得到,
+        // CP 会认为人在旁边, 锁屏瞬间就被自动解锁 → 看起来像"永远锁不上"。
+        var fresh = (now - _lastSeen).TotalSeconds <= 3;
+        var nearby = fresh && _rssiAvg != double.MinValue && _rssiAvg >= RssiThreshold;
         ProximityState.Write(nearby);
 
         // 预热期: 从没收到过目标 Beacon 时不能判定"丢失", 否则一启动就锁屏
@@ -180,11 +209,20 @@ public sealed class BeaconWatcher : IDisposable
 
         var shouldLock = lost || belowSeconds >= GraceSeconds;
 
+        // 防卡死: 锁过屏之后, 如果用户手动解锁回了桌面 (信号仍差, shouldLock 一直为 true,
+        // _locked 永不复位 → 之后永远不再锁屏)。检测到已解锁且距上次锁屏超过 5 秒就复位。
+        if (_locked && shouldLock && (now - _lastLockAt).TotalSeconds >= 5 && !IsSessionLocked())
+        {
+            _locked = false;
+            Log?.Invoke("[状态复位] 检测到已回到桌面但信号仍差, 将重新执行锁屏判定", LogLevel.Warn);
+        }
+
         if (shouldLock && !_locked)
         {
             var reason = lost ? $"信号丢失 {lostSeconds:F0}s" : $"RSSI={_rssiAvg:F0} 低于阈值 {RssiThreshold} 持续 {belowSeconds:F0}s";
             Log?.Invoke($"[触发锁屏] 原因: {reason}", LogLevel.Error);
             _locked = true;
+            _lastLockAt = now;
             LockStateChanged?.Invoke(true);
             LockWorkStationSafe();
         }
@@ -206,6 +244,19 @@ public sealed class BeaconWatcher : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"LockWorkStation exception: {ex}");
+        }
+    }
+
+    /// <summary>LogonUI 进程只在锁屏界面运行, 用它判断当前是否处于锁屏状态</summary>
+    private static bool IsSessionLocked()
+    {
+        try
+        {
+            return Process.GetProcessesByName("LogonUI").Length > 0;
+        }
+        catch
+        {
+            return false;   // 查不到就当没锁, 保守处理 (5 秒防抖兜底)
         }
     }
 

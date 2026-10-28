@@ -22,6 +22,7 @@ import java.util.UUID
 object UuidStore {
     const val DEFAULT = "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"
     private const val KEY = "beacon_uuid"
+    private const val KEY_SEED = "rolling_seed"
     private const val KEY_AUTO_START = "auto_start"
 
     private fun prefs(ctx: Context) =
@@ -31,6 +32,13 @@ object UuidStore {
 
     fun set(ctx: Context, value: String) {
         prefs(ctx).edit().putString(KEY, value).apply()
+    }
+
+    /** 滚动 UUID 种子, 空字符串 = 未启用滚动模式 (用固定 UUID) */
+    fun getSeed(ctx: Context): String = prefs(ctx).getString(KEY_SEED, "") ?: ""
+
+    fun setSeed(ctx: Context, value: String) {
+        prefs(ctx).edit().putString(KEY_SEED, value.lowercase().trim()).apply()
     }
 
     fun isAutoStart(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_AUTO_START, true)
@@ -64,6 +72,52 @@ class MainActivity : AppCompatActivity() {
 
         // 启动加载固化配置
         uuidEdit.setText(UuidStore.get(this))
+
+        // 滚动 UUID 种子 (防伪造): 有种子 = 滚动模式, 固定 UUID 不再生效
+        val seedEdit = findViewById<EditText>(R.id.seedEdit)
+        seedEdit.setText(UuidStore.getSeed(this))
+
+        findViewById<Button>(R.id.btnSeedPaste).setOnClickListener {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            val text = cm.primaryClip?.getItemAt(0)?.text?.toString()?.trim() ?: ""
+            if (!RollingUuid.isValidSeed(text)) {
+                Toast.makeText(this, "剪贴板里不是 32 位 hex 种子 (去 PC 端「生成种子」后复制)", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            seedEdit.setText(text.lowercase())
+            UuidStore.setSeed(this, text)
+            restartServiceIfRunning()
+            uuidEdit.isEnabled = false
+            Toast.makeText(this, "种子已保存, 进入滚动 UUID 模式", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btnSeedGen).setOnClickListener {
+            val seed = RollingUuid.randomSeed()
+            seedEdit.setText(seed)
+            UuidStore.setSeed(this, seed)
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("seed", seed))
+            restartServiceIfRunning()
+            uuidEdit.isEnabled = false
+            Toast.makeText(this, "已生成种子并复制到剪贴板, 把它粘贴到 PC 端", Toast.LENGTH_LONG).show()
+        }
+
+        findViewById<Button>(R.id.btnSeedCopy).setOnClickListener {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("seed", seedEdit.text.toString().trim()))
+            Toast.makeText(this, "已复制, 粘贴到 PC 端种子框", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btnSeedClear).setOnClickListener {
+            seedEdit.setText("")
+            UuidStore.setSeed(this, "")
+            restartServiceIfRunning()
+            uuidEdit.isEnabled = true
+            Toast.makeText(this, "已清除种子, 回到固定 UUID 模式", Toast.LENGTH_SHORT).show()
+        }
+
+        // 滚动模式下固定 UUID 无效, 输入框置灰提示
+        uuidEdit.isEnabled = !RollingUuid.isValidSeed(UuidStore.getSeed(this))
 
         // 默认侦听开关: 打开 App 自动进入广播状态
         autoStartSwitch.isChecked = UuidStore.isAutoStart(this)
@@ -200,10 +254,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUi(running: Boolean) {
         toggleBtn.text = if (running) "停止广播" else "开始广播"
-        statusText.text = if (running) {
-            "广播中 · 手机离开蓝牙范围后 PC 会自动锁屏"
-        } else {
-            "未运行 · 点下面按钮开启"
+        val rolling = RollingUuid.isValidSeed(UuidStore.getSeed(this))
+        statusText.text = when {
+            running && rolling -> "广播中 · 滚动 UUID (每分钟更换) · PC 端正在监听"
+            running -> "广播中 · 手机离开蓝牙范围后 PC 会自动锁屏"
+            else -> "未运行 · 点下面按钮开启"
         }
     }
 }

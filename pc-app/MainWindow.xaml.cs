@@ -35,7 +35,9 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         // 启动时读取固化配置, 没有就用默认 UUID
-        UuidBox.Text = LoadUuid() ?? DefaultUuid;
+        UuidBox.Text = LoadConfigUuid() ?? DefaultUuid;
+        SeedBox.Text = LoadConfigSeed() ?? "";
+        UpdateRollingUiState();
 
         RssiSlider.ValueChanged += (_, e) =>
             RssiValueText.Text = $"{(int)e.NewValue} dBm (阈值)";
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
 
         InitTrayIcon();
         InitAutoStart();
+        InitAutoUnlock();
 
         Loaded += (_, _) =>
         {
@@ -64,7 +67,10 @@ public partial class MainWindow : Window
 
         AppendLog("就绪。先在安卓端开启广播, 再点“开始监听”。", LogLevel.Info);
         AppendLog("关闭或最小化窗口会缩到托盘, 托盘图标右键可退出。", LogLevel.Info);
+        _uiReady = true;
     }
+
+    private bool _uiReady;
 
     // ---------- 托盘 ----------
 
@@ -201,9 +207,89 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------- UUID 配置固化 ----------
+    // ---------- 自动解锁 (Credential Provider 一键部署) ----------
 
-    private static string? LoadUuid()
+    private bool _autoUnlockInitializing;
+
+    private void InitAutoUnlock()
+    {
+        _autoUnlockInitializing = true;
+        AutoUnlockCheck.IsChecked = CpInstaller.IsInstalled();
+        _autoUnlockInitializing = false;
+    }
+
+    private async void AutoUnlock_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_autoUnlockInitializing || AutoUnlockCheck == null) return; // XAML 初始化中触发
+
+        bool want = AutoUnlockCheck.IsChecked == true;
+        string? error = want ? await EnableAutoUnlockAsync() : await DisableAutoUnlockAsync();
+
+        if (error != null)
+        {
+            // 失败/取消 → 复选框回弹到实际状态
+            _autoUnlockInitializing = true;
+            AutoUnlockCheck.IsChecked = CpInstaller.IsInstalled();
+            _autoUnlockInitializing = false;
+            AppendLog($"自动解锁: {error}", LogLevel.Warn);
+        }
+        else if (want)
+        {
+            AppendLog("自动解锁已开启: 锁屏后手机回到附近会自动进桌面 (仅本地账号)。" +
+                      "换密码后需取消勾选重新设置。", LogLevel.Ok);
+        }
+        else
+        {
+            AppendLog("自动解锁已卸载。离开锁屏功能不受影响。", LogLevel.Ok);
+        }
+    }
+
+    private async Task<string?> EnableAutoUnlockAsync()
+    {
+        var dlg = new PasswordDialog { Owner = this };
+        if (dlg.ShowDialog() != true) return "已取消";
+
+        var confirm = System.Windows.MessageBox.Show(
+            "即将自动安装 Windows 凭据提供程序 (需要管理员授权):\n\n" +
+            $"  账号: {dlg.Domain}\\{dlg.UserName}\n\n" +
+            "• 密码将用 DPAPI 加密存到本机 (C:\\ProgramData\\ProximityLock)\n" +
+            "• 仅支持本地账号, 微软邮箱账号登录的机器无效\n" +
+            "• 出问题可在本窗口取消勾选即可卸载\n\n继续?",
+            "开启自动解锁", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK) return "已取消";
+
+        AppendLog("正在安装自动解锁组件 (请在 UAC 弹窗里点「是”)…", LogLevel.Info);
+        try
+        {
+            return await CpInstaller.InstallAsync(dlg.UserName, dlg.Domain, dlg.Password);
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    private async Task<string?> DisableAutoUnlockAsync()
+    {
+        var confirm = System.Windows.MessageBox.Show(
+            "卸载自动解锁组件? (手机离开自动锁屏功能不受影响)",
+            "关闭自动解锁", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK) return "已取消";
+
+        AppendLog("正在卸载自动解锁组件 (请在 UAC 弹窗里点「是”)…", LogLevel.Info);
+        try
+        {
+            return await CpInstaller.UninstallAsync();
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    // ---------- UUID / 滚动种子 配置固化 ----------
+
+    private static string? LoadConfigUuid()
     {
         try
         {
@@ -214,16 +300,88 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
-    private static void SaveUuid(string uuid)
+    private static string? LoadConfigSeed()
+    {
+        try
+        {
+            if (!File.Exists(ConfigPath)) return null;
+            var json = JsonDocument.Parse(File.ReadAllText(ConfigPath));
+            return json.RootElement.TryGetProperty("seed", out var s) ? s.GetString() : null;
+        }
+        catch { return null; }
+    }
+
+    private static void SaveConfig(string uuid, string seed)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
         File.WriteAllText(ConfigPath,
-            JsonSerializer.Serialize(new { uuid }, new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(new { uuid, seed },
+                new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private string EffectiveSeed
+        => RollingUuid.IsValidSeed(SeedBox.Text) ? SeedBox.Text.Trim().ToLowerInvariant() : "";
+
+    /// <summary>滚动模式开关变化: 固定 UUID 失效置灰</summary>
+    private void UpdateRollingUiState()
+    {
+        var rolling = EffectiveSeed.Length > 0;
+        UuidBox.IsEnabled = !rolling;
+        UuidBox.Opacity = rolling ? 0.5 : 1.0;
+    }
+
+    /// <summary>种子框内容变化 → 校验并立即固化 (输入合法 hex 才生效, 不用单独按保存)</summary>
+    private void SeedBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (SeedBox == null || !_uiReady) return; // XAML 初始化中触发
+        var seed = EffectiveSeed;
+        SaveConfig(UuidBox.Text.Trim(), seed);
+        UpdateRollingUiState();
+        if (seed.Length > 0 && SeedBox.Text.Trim().Length == 32)
+        {
+            // 输满 32 位合法 hex 时提示一次并热切模式
+            AppendLog("滚动 UUID 已启用: 两端种子一致才会互相识别, 手机在跑的话重启广播生效。", LogLevel.Ok);
+        }
+        RestartWatcherIfRunning();
+    }
+
+    private void SeedGenBtn_Click(object sender, RoutedEventArgs e)
+    {
+        SeedBox.Text = RollingUuid.RandomSeed();   // TextChanged 会自动保存
+        try
+        {
+            System.Windows.Clipboard.SetText(SeedBox.Text);
+            AppendLog("已生成滚动种子并复制到剪贴板 → 粘贴到手机端「滚动 UUID 种子」框, 两端一致即可。", LogLevel.Ok);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"种子已生成, 但复制剪贴板失败: {ex.Message} (手动复制输入框内容)", LogLevel.Warn);
+        }
+    }
+
+    private void SeedCopyBtn_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(SeedBox.Text.Trim());
+            AppendLog("种子已复制到剪贴板。", LogLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"复制失败: {ex.Message}", LogLevel.Warn);
+        }
+    }
+
+    private void SeedClearBtn_Click(object sender, RoutedEventArgs e)
+    {
+        SeedBox.Text = "";   // TextChanged 会保存空种子并热切回固定模式
+        AppendLog("已清除种子, 回到固定 UUID 模式。", LogLevel.Info);
     }
 
     private void RandBtn_Click(object sender, RoutedEventArgs e)
     {
         UuidBox.Text = Guid.NewGuid().ToString().ToUpper();
+        SaveConfig(UuidBox.Text.Trim(), EffectiveSeed);
         AppendLog("已生成随机 UUID, 手机端填同一个后点“保存”固化。", LogLevel.Info);
     }
 
@@ -243,7 +401,7 @@ public partial class MainWindow : Window
     private void DefaultBtn_Click(object sender, RoutedEventArgs e)
     {
         UuidBox.Text = DefaultUuid;
-        SaveUuid(DefaultUuid);
+        SaveConfig(DefaultUuid, EffectiveSeed);
         RestartWatcherIfRunning();
         AppendLog("已恢复默认 UUID 并固化。", LogLevel.Ok);
     }
@@ -255,7 +413,7 @@ public partial class MainWindow : Window
             AppendLog("UUID 格式不对, 没保存。", LogLevel.Warn);
             return;
         }
-        SaveUuid(UuidBox.Text.Trim());
+        SaveConfig(UuidBox.Text.Trim(), EffectiveSeed);
         RestartWatcherIfRunning();
         AppendLog($"UUID 已固化: {UuidBox.Text.Trim()} (下次开机自动加载)", LogLevel.Ok);
     }
@@ -292,7 +450,12 @@ public partial class MainWindow : Window
         }
 
         _watcher?.Dispose();
-        _watcher = new BeaconWatcher(uuid, (int)RssiSlider.Value, lostTimeout);
+        _watcher = new BeaconWatcher(uuid, (int)RssiSlider.Value, lostTimeout)
+        {
+            SeedHex = EffectiveSeed.Length > 0 ? EffectiveSeed : null,
+        };
+        if (EffectiveSeed.Length > 0)
+            AppendLog("滚动 UUID 模式: 正在按种子动态识别目标手机。", LogLevel.Info);
         _watcher.Log += (msg, level) => Dispatcher.Invoke(() => AppendLog(msg, level));
 
         _watcher.Start();
@@ -343,14 +506,18 @@ public partial class MainWindow : Window
 
         foreach (var b in list)
         {
+            // 绿 = 达到阈值 (在附近, 可自动解锁); 橙 = 收得到但低于阈值 (远处, 不算在附近)
+            bool close = b.AvgRssi >= _watcher.RssiThreshold;
             var tb = new TextBlock
             {
                 Padding = new Thickness(0, 2, 0, 2),
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12,
-                Foreground = Brushes.Green,
+                Foreground = close ? Brushes.Green : Brushes.Orange,
                 FontWeight = FontWeights.Bold,
-                Text = $"[目标手机] {b.Uuid}  {b.AvgRssi} dBm  · {b.AgeSeconds:F0}s 前",
+                Text = close
+                    ? $"[目标手机·在附近] {b.Uuid}  {b.AvgRssi} dBm  · {b.AgeSeconds:F0}s 前"
+                    : $"[目标手机·信号弱] {b.Uuid}  {b.AvgRssi} dBm (< 阈值 {_watcher.RssiThreshold}, 会触发锁屏)",
             };
             SignalList.Items.Add(tb);
         }

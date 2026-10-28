@@ -47,13 +47,43 @@ class BeaconService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startAsForeground()
+        startAdvertising()
+        isRunning = true
+        return START_STICKY
+    }
 
-        // 每次启动都从固化配置读 UUID, 用户改过就跟随
-        val uuid = try {
-            UUID.fromString(UuidStore.get(this))
-        } catch (_: IllegalArgumentException) {
-            UUID.fromString(UuidStore.DEFAULT)
+    override fun onDestroy() {
+        rotateHandler.removeCallbacks(rotateRunnable)
+        advertiser?.stopAdvertising(callback)
+        isRunning = false
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private val rotateHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** 时间片切换时重启广播, 换上新的滚动 UUID */
+    private val rotateRunnable = Runnable {
+        if (isRunning) startAdvertising()
+    }
+
+    private fun startAdvertising() {
+        val seed = UuidStore.getSeed(this)
+        val rolling = RollingUuid.isValidSeed(seed)
+
+        // 滚动模式: 按种子+时间片推导 UUID; 否则用固定 UUID
+        val uuid = if (rolling) {
+            RollingUuid.derive(seed, RollingUuid.sliceAt())
+        } else {
+            try {
+                UUID.fromString(UuidStore.get(this))
+            } catch (_: IllegalArgumentException) {
+                UUID.fromString(UuidStore.DEFAULT)
+            }
         }
+
+        advertiser?.stopAdvertising(callback)
 
         val payload = buildIBeaconPayload(uuid)
         val settings = AdvertiseSettings.Builder()
@@ -68,17 +98,15 @@ class BeaconService : Service() {
             .build()
 
         advertiser?.startAdvertising(settings, data, callback)
-        isRunning = true
-        return START_STICKY
-    }
 
-    override fun onDestroy() {
-        advertiser?.stopAdvertising(callback)
-        isRunning = false
-        super.onDestroy()
+        // 滚动模式: 定时到下一个分钟整点换 UUID
+        rotateHandler.removeCallbacks(rotateRunnable)
+        if (rolling) {
+            val nextBoundaryMs = (RollingUuid.sliceAt() + 1) * RollingUuid.SLICE_SECONDS * 1000
+            val delay = (nextBoundaryMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+            rotateHandler.postDelayed(rotateRunnable, delay)
+        }
     }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 
     /** 组装 iBeacon 帧: 0x02,0x15 + UUID(16B) + Major(2B) + Minor(2B) + TxPower(1B) */
     private fun buildIBeaconPayload(uuid: UUID): ByteArray {
