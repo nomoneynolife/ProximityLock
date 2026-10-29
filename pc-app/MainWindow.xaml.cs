@@ -47,7 +47,7 @@ public partial class MainWindow : Window
         LogBox.Document = new System.Windows.Documents.FlowDocument(
             new System.Windows.Documents.Paragraph { Margin = new Thickness(0) })
         {
-            PagePadding = new Thickness(8, 4, 8, 4),
+            PagePadding = new Thickness(8, 2, 8, 4),
         };
 
         // 日志自动清屏: 到点清空并提示一句
