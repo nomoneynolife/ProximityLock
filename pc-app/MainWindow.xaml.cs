@@ -41,6 +41,10 @@ public partial class MainWindow : Window
         _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _uiTimer.Tick += (_, _) => RefreshSignalPanel();
 
+        // RichTextBox 默认文档自带一个空的第一段落, 会占一整行高度,
+        // 在 XAML Padding 之外多出一大截顶部间隙 — 启动时清空 Blocks 干掉它
+        LogBox.Document.Blocks.Clear();
+
         // 日志自动清屏: 到点清空并提示一句
         _logClearTimer = new DispatcherTimer();
         _logClearTimer.Tick += (_, _) =>
