@@ -42,8 +42,13 @@ public partial class MainWindow : Window
         _uiTimer.Tick += (_, _) => RefreshSignalPanel();
 
         // 日志区内边距: 控制层 Padding 管不到 RichTextBox 里的文档内容,
-        // 必须直接设 FlowDocument 的 PagePadding (默认自带一大截上下边距)
-        LogBox.Document.PagePadding = new Thickness(8, 4, 8, 4);
+        // 必须直接设 FlowDocument 的 PagePadding; 同时 RichTextBox 默认自带
+        // 一个空的第一段落 (占一整行, 就是"日志贴不到顶部"的元凶), 清掉重建
+        LogBox.Document = new System.Windows.Documents.FlowDocument(
+            new System.Windows.Documents.Paragraph { Margin = new Thickness(0) })
+        {
+            PagePadding = new Thickness(8, 4, 8, 4),
+        };
 
         // 日志自动清屏: 到点清空并提示一句
         _logClearTimer = new DispatcherTimer();
