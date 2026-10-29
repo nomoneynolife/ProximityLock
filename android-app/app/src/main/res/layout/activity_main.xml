@@ -427,7 +427,7 @@
             android:lineSpacingExtra="3dp"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
-            android:text="首次使用：在 Windows 蓝牙设置里配对本机一次，PC 端选中它即可\nProximityLock v0.4.1 · github.com/nomoneynolife/ProximityLock"
+            android:text="首次使用：在 Windows 蓝牙设置里配对本机一次，PC 端选中它即可\nProximityLock v0.5.1 · github.com/nomoneynolife/ProximityLock"
             android:textColor="#9AA2B8"
             android:textSize="11sp" />
     </LinearLayout>
