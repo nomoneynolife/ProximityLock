@@ -79,7 +79,6 @@
 
         <RichTextBox Grid.Row="6" x:Name="LogBox" Background="#FAFAFA"
                      BorderBrush="#DDDDDD" BorderThickness="1" IsReadOnly="True"
-                     Padding="8,6,8,6"
                      VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
 
         <TextBlock Grid.Row="7" HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="11" Foreground="#999999">

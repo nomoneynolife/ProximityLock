@@ -41,6 +41,10 @@ public partial class MainWindow : Window
         _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _uiTimer.Tick += (_, _) => RefreshSignalPanel();
 
+        // 日志区内边距: 控制层 Padding 管不到 RichTextBox 里的文档内容,
+        // 必须直接设 FlowDocument 的 PagePadding (默认自带一大截上下边距)
+        LogBox.Document.PagePadding = new Thickness(8, 4, 8, 4);
+
         // 日志自动清屏: 到点清空并提示一句
         _logClearTimer = new DispatcherTimer();
         _logClearTimer.Tick += (_, _) =>
