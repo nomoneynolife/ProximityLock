@@ -46,7 +46,7 @@ public partial class MainWindow : Window
         // 两个坑: ①不能用 FlowDocument(new Paragraph(...)) 构造 — 空段落占一整行;
         // ②RichTextBox 挂载文档时会重置 PagePadding — 必须在赋值之后再设
         LogBox.Document = new System.Windows.Documents.FlowDocument();
-        LogBox.Document.PagePadding = new Thickness(0, 2, 0, 0);
+        LogBox.Document.PagePadding = new Thickness(0, 4, 0, 0);
 
         // 日志自动清屏: 到点清空并提示一句
         _logClearTimer = new DispatcherTimer();
