@@ -5,6 +5,7 @@ public enum LogLevel { Info, Ok, Warn, Error }
 /// <summary>
 /// 接近监听器接口。连接模式 (GattWatcher): 与配对手机维持 GATT 长连接,
 /// 连着 = 人在旁边 (state.ini 写 near=1, 锁屏界面自动解锁), 断开 = 锁屏。
+/// 手机端的「锁定 / 解锁电脑」按钮走蓝牙开关方案, 不经过此接口。
 /// </summary>
 public interface IProximityWatcher : IDisposable
 {

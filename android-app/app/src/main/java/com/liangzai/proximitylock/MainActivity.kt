@@ -53,6 +53,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoStartSwitch: SwitchCompat
     private lateinit var tvBatteryState: TextView
     private lateinit var tvAlarmState: TextView
+    private lateinit var tvRemoteState: TextView
+
+    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var _stickyUntil = 0L
+    private val uiTick = object : Runnable {
+        override fun run() {
+            refreshConnectionUi()
+            uiHandler.postDelayed(this, 1000)
+        }
+    }
+
     private val adapter: BluetoothAdapter?
         get() = (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
@@ -66,6 +77,15 @@ class MainActivity : AppCompatActivity() {
         autoStartSwitch = findViewById(R.id.autoStartSwitch)
         tvBatteryState = findViewById(R.id.tvBatteryState)
         tvAlarmState = findViewById(R.id.tvAlarmState)
+        tvRemoteState = findViewById(R.id.tvRemoteState)
+
+        // 锁定 / 解锁: 走已建立的蓝牙链路, PC 端毫秒级响应
+        findViewById<Button>(R.id.btnLock).setOnClickListener {
+            sendRemoteCommand(BeaconService.CMD_LOCK)
+        }
+        findViewById<Button>(R.id.btnUnlock).setOnClickListener {
+            sendRemoteCommand(BeaconService.CMD_UNLOCK)
+        }
 
         autoStartSwitch.isChecked = PrefStore.isAutoStart(this)
         autoStartSwitch.setOnCheckedChangeListener { _, checked ->
@@ -154,6 +174,8 @@ class MainActivity : AppCompatActivity() {
         updateUi(BeaconService.isRunning)
         refreshBatteryState(getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
         refreshAlarmState()
+        uiHandler.removeCallbacks(uiTick)
+        uiHandler.post(uiTick)   // 每秒刷新一次连接状态 (PC 连上/断开能立刻看到)
 
         // 自动开始: 开关开着且服务没在跑 → 自动进入广播状态
         if (autoStartSwitch.isChecked && !BeaconService.isRunning) {
@@ -162,6 +184,64 @@ class MainActivity : AppCompatActivity() {
             } else {
                 ensurePermissions() // 授权后 onRequestPermissionsResult 里会自动开
             }
+        }
+    }
+
+    override fun onPause() {
+        uiHandler.removeCallbacks(uiTick)
+        super.onPause()
+    }
+
+    /** 手机端「锁定电脑 / 解锁电脑」按钮 */
+    private fun sendRemoteCommand(cmd: String) {
+        val label = if (cmd == BeaconService.CMD_LOCK) "锁定" else "解锁"
+        when (BeaconService.sendCommand(cmd)) {
+            BeaconService.RESULT_OK ->
+                Toast.makeText(this, "已${label}电脑 (蓝牙通道, 与信号强弱无关)",
+                    Toast.LENGTH_SHORT).show()
+            BeaconService.RESULT_NEED_ENABLE -> {
+                // Android 13+ 禁止 App 静默开蓝牙: 弹系统授权框, 用户点「允许」后
+                // 服务里的蓝牙状态监听会自动恢复广播, PC 秒重连解锁
+                Toast.makeText(this, "请点击弹窗允许打开蓝牙, 电脑会自动连上解锁",
+                    Toast.LENGTH_LONG).show()
+                try {
+                    startActivity(android.content.Intent(
+                        android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                } catch (_: Exception) { }
+            }
+            BeaconService.RESULT_NOT_RUNNING ->
+                Toast.makeText(this, "自动解锁服务没在运行，先点上面的「自动解锁」",
+                    Toast.LENGTH_SHORT).show()
+            BeaconService.RESULT_NO_PC ->
+                Toast.makeText(this, "电脑还没连上，确认 PC 端已点「开始监听」",
+                    Toast.LENGTH_LONG).show()
+            else ->
+                Toast.makeText(this, "发送失败，试着重新开启自动解锁", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 每秒刷新: 服务状态 + PC 是否在线 */
+    private fun refreshConnectionUi() {
+        if (System.currentTimeMillis() < _stickyUntil) return
+        val running = BeaconService.isRunning
+        val linked = BeaconService.pcConnected
+        if (!running) {
+            statusText.text = "自动解锁未开启"
+            statusDot.setBackgroundResource(R.drawable.dot_idle)
+            tvRemoteState.text = "开启自动解锁后，才能用手机控制电脑。"
+            tvRemoteState.setTextColor(ContextCompat.getColor(this, R.color.ink_soft))
+            return
+        }
+        if (linked) {
+            statusText.text = "已连接电脑 · 自动解锁生效中"
+            statusDot.setBackgroundResource(R.drawable.dot_ok)
+            tvRemoteState.text = "电脑已连接 · 点上方按钮立即生效"
+            tvRemoteState.setTextColor(ContextCompat.getColor(this, R.color.ok))
+        } else {
+            statusText.text = "等待电脑连接…"
+            statusDot.setBackgroundResource(R.drawable.dot_warn)
+            tvRemoteState.text = "等待电脑连接…（PC 端需已点「开始监听」）"
+            tvRemoteState.setTextColor(ContextCompat.getColor(this, R.color.ink_soft))
         }
     }
 
@@ -242,7 +322,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 临时提示 (4 秒内不被每秒刷新覆盖) */
     private fun showStatus(text: String, running: Boolean) {
+        _stickyUntil = System.currentTimeMillis() + 4000
         statusText.text = text
         statusDot.setBackgroundResource(if (running) R.drawable.dot_ok else R.drawable.dot_warn)
     }
@@ -251,13 +333,10 @@ class MainActivity : AppCompatActivity() {
         if (running) {
             toggleBtn.text = "停止解锁"
             toggleBtn.setBackgroundResource(R.drawable.bg_btn_stop)
-            statusText.text = "自动解锁已开启 · 等待 PC 连接"
-            statusDot.setBackgroundResource(R.drawable.dot_ok)
         } else {
             toggleBtn.text = "自动解锁"
             toggleBtn.setBackgroundResource(R.drawable.bg_btn_primary)
-            statusText.text = "自动解锁未开启"
-            statusDot.setBackgroundResource(R.drawable.dot_idle)
         }
+        refreshConnectionUi()
     }
 }

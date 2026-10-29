@@ -111,6 +111,65 @@
                 android:text="PC 与手机保持蓝牙长连接：连着 = 自动解锁，断开 = 锁屏。\n手机熄屏放桌上不影响，无需一直亮屏。"
                 android:textColor="@color/ink_soft"
                 android:textSize="12sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="18dp"
+                android:background="@color/line" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:letterSpacing="0.08"
+                android:text="远程控制电脑"
+                android:textColor="@color/ink_soft"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnLock"
+                    android:layout_width="0dp"
+                    android:layout_height="50dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_btn_lock"
+                    android:stateListAnimator="@null"
+                    android:text="锁定电脑"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnUnlock"
+                    android:layout_width="0dp"
+                    android:layout_height="50dp"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_btn_secondary"
+                    android:stateListAnimator="@null"
+                    android:text="解锁电脑"
+                    android:textAllCaps="false"
+                    android:textColor="@color/brand_deep"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvRemoteState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:lineSpacingExtra="3dp"
+                android:text="点一下立刻生效，走已建立的蓝牙链路，不用等自动判定。"
+                android:textColor="@color/ink_soft"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- ===== 设置卡片 ===== -->
@@ -368,7 +427,7 @@
             android:lineSpacingExtra="3dp"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
-            android:text="首次使用：在 Windows 蓝牙设置里配对本机一次，PC 端选中它即可\nProximityLock v0.3.1 · github.com/nomoneynolife/ProximityLock"
+            android:text="首次使用：在 Windows 蓝牙设置里配对本机一次，PC 端选中它即可\nProximityLock v0.4.1 · github.com/nomoneynolife/ProximityLock"
             android:textColor="#9AA2B8"
             android:textSize="11sp" />
     </LinearLayout>

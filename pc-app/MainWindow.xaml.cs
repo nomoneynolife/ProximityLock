@@ -24,6 +24,7 @@ public partial class MainWindow : Window
 
     private IProximityWatcher? _watcher;
     private readonly DispatcherTimer _uiTimer;
+    private readonly DispatcherTimer _logClearTimer;
 
     /// <summary>连接模式下拉框里的一项 (已配对的 BLE 设备)</summary>
     public sealed record PairedDevice(string Display, ulong Address, string Name, string DeviceId);
@@ -40,10 +41,19 @@ public partial class MainWindow : Window
         _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _uiTimer.Tick += (_, _) => RefreshSignalPanel();
 
+        // 日志自动清屏: 到点清空并提示一句
+        _logClearTimer = new DispatcherTimer();
+        _logClearTimer.Tick += (_, _) =>
+        {
+            LogBox.Document.Blocks.Clear();
+            AppendLog("日志已自动清屏 (可在上方设置调整或关闭)。", LogLevel.Info);
+        };
+
         InitTrayIcon();
         InitAutoStart();
         InitAutoUnlock();
         InitVersionFooter();
+        InitLogClear();
         _ = LoadPairedDevicesAsync();
 
         Loaded += (_, _) =>
@@ -294,32 +304,91 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---------- 日志清屏 ----------
+
+    /// <summary>读 config 初始化自动清屏 UI 和定时器</summary>
+    private void InitLogClear()
+    {
+        var cfg = LoadConfig();
+        AutoClearLogCheck.IsChecked = cfg.autoClearLog;
+        var idx = cfg.clearLogMinutes switch
+        {
+            30 => 0, 60 => 1, 120 => 2, 240 => 3, 480 => 4, _ => 1,
+        };
+        ClearIntervalBox.SelectedIndex = idx;
+        ClearIntervalBox.IsEnabled = cfg.autoClearLog;
+
+        _logClearTimer.Interval = TimeSpan.FromMinutes(Math.Max(5, cfg.clearLogMinutes));
+        if (cfg.autoClearLog) _logClearTimer.Start();
+    }
+
+    private void SaveLogClearConfig()
+    {
+        var cfg = LoadConfig();
+        cfg.autoClearLog = AutoClearLogCheck.IsChecked == true;
+        cfg.clearLogMinutes = ClearIntervalBox.SelectedItem is ComboBoxItem it
+            && int.TryParse(it.Tag?.ToString(), out var m) ? m : 60;
+        SaveConfig(cfg);
+    }
+
+    private void AutoClearLog_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || AutoClearLogCheck == null) return;
+        bool on = AutoClearLogCheck.IsChecked == true;
+        ClearIntervalBox.IsEnabled = on;
+        if (on) _logClearTimer.Start(); else _logClearTimer.Stop();
+        SaveLogClearConfig();
+    }
+
+    private void ClearInterval_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || ClearIntervalBox == null
+            || ClearIntervalBox.SelectedItem is not ComboBoxItem item
+            || !int.TryParse(item.Tag?.ToString(), out var minutes)) return;
+
+        _logClearTimer.Interval = TimeSpan.FromMinutes(Math.Max(5, minutes));
+        SaveLogClearConfig();
+    }
+
+    private void ClearLogBtn_Click(object sender, RoutedEventArgs e)
+    {
+        LogBox.Document.Blocks.Clear();
+    }
+
     // ---------- 连接模式: 已配对 BLE 设备 ----------
 
-    private static (ulong Address, string Name)? LoadConfigDevice()
+    /// <summary>config.json 全量配置 (设备选择 + 日志自动清屏)</summary>
+    public sealed class AppConfig
+    {
+        public string? deviceAddress { get; set; }
+        public string? deviceName { get; set; }
+        public bool autoClearLog { get; set; } = true;
+        public int clearLogMinutes { get; set; } = 60;
+    }
+
+    private static AppConfig LoadConfig()
     {
         try
         {
-            if (!File.Exists(ConfigPath)) return null;
-            var json = JsonDocument.Parse(File.ReadAllText(ConfigPath));
-            if (!json.RootElement.TryGetProperty("deviceAddress", out var a)) return null;
-            if (!ulong.TryParse(a.GetString(), out var addr)) return null;
-            var name = json.RootElement.TryGetProperty("deviceName", out var n) ? n.GetString() ?? "" : "";
-            return (addr, name);
+            if (!File.Exists(ConfigPath)) return new AppConfig();
+            return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath)) ?? new AppConfig();
         }
-        catch { return null; }
+        catch { return new AppConfig(); }
+    }
+
+    private static void SaveConfig(AppConfig cfg)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.WriteAllText(ConfigPath,
+            JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static void SaveSelectedDeviceStatic(PairedDevice? device)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-        File.WriteAllText(ConfigPath,
-            JsonSerializer.Serialize(new
-            {
-                deviceAddress = device?.Address.ToString() ?? null,
-                deviceName = device?.Name ?? null,
-            },
-            new JsonSerializerOptions { WriteIndented = true }));
+        var cfg = LoadConfig();
+        cfg.deviceAddress = device?.Address.ToString();
+        cfg.deviceName = device?.Name;
+        SaveConfig(cfg);
     }
 
     /// <summary>枚举系统里已配对的 BLE 设备 (手机在 Windows 蓝牙设置里配对一次即可出现在这里)</summary>
@@ -340,11 +409,12 @@ public partial class MainWindow : Window
             }
 
             // 恢复上次的选择
-            var saved = LoadConfigDevice();
+            var saved = LoadConfig();
             DeviceBox.ItemsSource = items;
-            if (saved != null)
+            if (!string.IsNullOrEmpty(saved.deviceAddress)
+                && ulong.TryParse(saved.deviceAddress, out var savedAddr))
             {
-                var hit = items.FirstOrDefault(d => d.Address == saved.Value.Address);
+                var hit = items.FirstOrDefault(d => d.Address == savedAddr);
                 if (hit != null)
                 {
                     DeviceBox.SelectedItem = hit;
@@ -397,7 +467,7 @@ public partial class MainWindow : Window
         SaveSelectedDeviceStatic(dev);
 
         // 连接模式: GATT 长连接, 连着=解锁, 断开=锁屏 (2 秒防抖)
-        _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name, lostTimeout: 2);
+        _watcher = new GattWatcher(dev.Address, dev.DeviceId, dev.Name, lostTimeout: 5);
         _watcher.Log += (msg, level) => Dispatcher.Invoke(() => AppendLog(msg, level));
 
         _watcher.Start();

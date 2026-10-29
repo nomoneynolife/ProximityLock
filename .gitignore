@@ -22,4 +22,7 @@ cp/build.log
 # 系统与工具
 Thumbs.db
 .DS_Store
+.codex/
+.chatgpt/
 .workbuddy/
+.cursor/
