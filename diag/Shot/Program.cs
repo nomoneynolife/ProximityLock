@@ -2,6 +2,9 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
+var HWND_TOPMOST = new IntPtr(-1);
+var HWND_NOTOPMOST = new IntPtr(-2);
+
 if (args.Length < 2)
 {
     Console.WriteLine("usage: Shot <savePath> <windowTitleSubstring>");
@@ -29,8 +32,10 @@ if (hwnd == IntPtr.Zero)
 }
 
 ShowWindow(hwnd, 9);           // SW_RESTORE
+SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040); // 置顶防遮挡
 SetForegroundWindow(hwnd);
 Thread.Sleep(1200);
+SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040);
 
 GetWindowRect(hwnd, out var r);
 using var bmp = new Bitmap(r.Width, r.Height);
@@ -45,6 +50,7 @@ Console.WriteLine($"saved {args[0]} rect={r.Left},{r.Top} {r.Width}x{r.Height}")
 [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+[DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
 delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
 struct RECT { public int Left, Top, Right, Bottom; public int Width => Right - Left; public int Height => Bottom - Top; }
